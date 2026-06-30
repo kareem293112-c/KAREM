@@ -779,6 +779,21 @@ export default function App() {
           >
             © {new Date().getFullYear()} {t.appName}. {t.footerRights}.
           </p>
+          <p
+            className={`mt-2.5 text-[11px] font-black tracking-wide flex items-center justify-center gap-1.5 ${
+              theme === 'dark'
+                ? 'text-indigo-400'
+                : theme === 'eye-care'
+                ? 'text-amber-950'
+                : 'text-indigo-600'
+            }`}
+          >
+            <span>✨</span>
+            <span>
+              {lang === 'ar' ? 'تطوير وإشراف: محمد شيباني (Mohamed Shibani)' : 'Developed & Supervised by: Mohamed Shibani'}
+            </span>
+            <span>✨</span>
+          </p>
         </div>
       </footer>
 
