@@ -788,11 +788,9 @@ export default function App() {
                 : 'text-indigo-600'
             }`}
           >
-            <span>✨</span>
             <span>
               {lang === 'ar' ? 'تطوير وإشراف: محمد شيباني (Mohamed Shibani)' : 'Developed & Supervised by: Mohamed Shibani'}
             </span>
-            <span>✨</span>
           </p>
         </div>
       </footer>
