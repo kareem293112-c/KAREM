@@ -1,0 +1,30 @@
+{
+  "short_name": "المحاسب الذكي",
+  "name": "نظام المحاسب الذكي المتكامل",
+  "description": "إدارة مخزونك، مبيعاتك، وأرباحك وخسائرك في مكان واحد دون اتصال بالإنترنت",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#1e1b4b",
+  "theme_color": "#312e81",
+  "display": "standalone",
+  "orientation": "any"
+}

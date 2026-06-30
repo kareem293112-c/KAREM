@@ -1,0 +1,6 @@
+{
+  "name": "تطبيق المحاسبة وإدارة المبيعات",
+  "description": "تطبيق محاسبة متكامل لتسجيل المنتجات وحساب الأرباح والخسائر وإدارة عمليات البيع بدقة وسهولة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

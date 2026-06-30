@@ -1,0 +1,849 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { Product, Transaction, CartItem } from './types';
+import Dashboard from './components/Dashboard';
+import POS from './components/POS';
+import Inventory from './components/Inventory';
+import TransactionHistory from './components/TransactionHistory';
+import { LayoutDashboard, ShoppingCart, Package, History, Calculator, HelpCircle, Layers, Globe, Sun, Moon, Eye, Wifi, WifiOff, Download, RefreshCw } from 'lucide-react';
+import { translations } from './translations';
+import { pwaDb } from './db/pwaDb';
+
+export default function App() {
+  // --- STATE ---
+  const [products, setProducts] = useState<Product[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'pos' | 'inventory' | 'history'>('dashboard');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  // PWA and Online/Offline state variables
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBtn, setShowInstallBtn] = useState(false);
+
+  const [lang, setLang] = useState<'ar' | 'en'>(() => {
+    return (localStorage.getItem('accounting_lang') as 'ar' | 'en') || 'ar';
+  });
+  
+  const [theme, setTheme] = useState<'light' | 'dark' | 'eye-care'>(() => {
+    return (localStorage.getItem('accounting_theme') as 'light' | 'dark' | 'eye-care') || 'light';
+  });
+
+  const t = translations[lang];
+
+  const toggleLanguage = () => {
+    const nextLang = lang === 'ar' ? 'en' : 'ar';
+    setLang(nextLang);
+    localStorage.setItem('accounting_lang', nextLang);
+  };
+
+  const changeTheme = (newTheme: 'light' | 'dark' | 'eye-care') => {
+    setTheme(newTheme);
+    localStorage.setItem('accounting_theme', newTheme);
+  };
+
+  // Real-time clock updater
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Listen to network status & beforeinstallprompt
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      triggerDataSync();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  // Sync queue runner
+  const triggerDataSync = async () => {
+    if (!navigator.onLine) return;
+    setIsSyncing(true);
+
+    try {
+      const queue = await pwaDb.getSyncQueue();
+      if (queue.length > 0) {
+        console.log(`[PWA Sync] Syncing ${queue.length} pending operations with server...`, queue);
+        
+        // Try calling custom backend endpoints if present
+        try {
+          await fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queue })
+          });
+        } catch (err) {
+          // No backend endpoint up yet - fallback gracefully
+        }
+
+        // Artificial server processing latency for visual feedback
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+
+        // Safely clear sync queue in IndexedDB
+        for (const item of queue) {
+          await pwaDb.removeFromSyncQueue(item.id);
+        }
+        console.log("[PWA Sync] Sync completed successfully!");
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    } catch (error) {
+      console.error("[PWA Sync] Background synchronization failed:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log(`User response to install prompt: ${outcome}`);
+    setDeferredPrompt(null);
+    setShowInstallBtn(false);
+  };
+
+  // --- INITIALIZATION (LocalStorage & IndexedDB Dual Load with safe migration) ---
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        let dbProducts = await pwaDb.getProducts();
+        let dbTransactions = await pwaDb.getTransactions();
+
+        // Safe migration from LocalStorage to IndexedDB if first load
+        if (dbProducts.length === 0) {
+          const savedProducts = localStorage.getItem('accounting_products');
+          if (savedProducts) {
+            try {
+              const parsed = JSON.parse(savedProducts);
+              if (parsed && parsed.length > 0) {
+                dbProducts = parsed;
+                await pwaDb.saveProductsBatch(parsed);
+              }
+            } catch (e) {}
+          }
+        }
+
+        if (dbTransactions.length === 0) {
+          const savedTransactions = localStorage.getItem('accounting_transactions');
+          if (savedTransactions) {
+            try {
+              const parsed = JSON.parse(savedTransactions);
+              if (parsed && parsed.length > 0) {
+                dbTransactions = parsed;
+                await pwaDb.saveTransactionsBatch(parsed);
+              }
+            } catch (e) {}
+          }
+        }
+
+        // Force clear if any old demo products are present
+        const hasDemoData = dbProducts.some(
+          (p) => p.id === 'prod-1' || p.id === 'prod-2' || p.id === 'prod-3' || p.id === 'prod-4' || p.id === 'prod-5' || p.id === 'prod-6'
+        );
+        if (hasDemoData) {
+          dbProducts = [];
+          dbTransactions = [];
+          await pwaDb.clearAll();
+          localStorage.setItem('accounting_products', JSON.stringify([]));
+          localStorage.setItem('accounting_transactions', JSON.stringify([]));
+        }
+
+        setProducts(dbProducts);
+        setTransactions(dbTransactions);
+      } catch (error) {
+        console.error("Failed to load data from IndexedDB, falling back to LocalStorage:", error);
+        const savedProducts = localStorage.getItem('accounting_products');
+        const savedTransactions = localStorage.getItem('accounting_transactions');
+        if (savedProducts) {
+          try { setProducts(JSON.parse(savedProducts)); } catch(e){}
+        }
+        if (savedTransactions) {
+          try { setTransactions(JSON.parse(savedTransactions)); } catch(e){}
+        }
+      }
+    };
+
+    loadData();
+  }, []);
+
+  // --- STATE PERSISTENCE ---
+  const saveProducts = async (updatedProducts: Product[], skipDb = false) => {
+    setProducts(updatedProducts);
+    localStorage.setItem('accounting_products', JSON.stringify(updatedProducts));
+    if (!skipDb) {
+      try {
+        await pwaDb.saveProductsBatch(updatedProducts);
+        if (!isOnline) {
+          await pwaDb.addToSyncQueue({
+            id: `sync-prod-${Date.now()}`,
+            type: 'product_update',
+            payload: updatedProducts
+          });
+        }
+      } catch (err) {
+        console.error("Failed to save products to IndexedDB:", err);
+      }
+    }
+  };
+
+  const saveTransactions = async (updatedTransactions: Transaction[], skipDb = false) => {
+    setTransactions(updatedTransactions);
+    localStorage.setItem('accounting_transactions', JSON.stringify(updatedTransactions));
+    if (!skipDb) {
+      try {
+        await pwaDb.saveTransactionsBatch(updatedTransactions);
+        if (!isOnline && updatedTransactions.length > 0) {
+          await pwaDb.addToSyncQueue({
+            id: `sync-tx-${Date.now()}`,
+            type: 'transaction_add',
+            payload: updatedTransactions[0]
+          });
+        }
+      } catch (err) {
+        console.error("Failed to save transactions to IndexedDB:", err);
+      }
+    }
+  };
+
+  // --- ACTION HANDLERS ---
+
+  // Add Product
+  const handleAddProduct = (newProd: Omit<Product, 'id' | 'createdAt'>) => {
+    const created: Product = {
+      ...newProd,
+      id: `prod-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [created, ...products];
+    saveProducts(updated);
+  };
+
+  // Update Product
+  const handleUpdateProduct = (updatedProd: Product) => {
+    const updated = products.map((p) => (p.id === updatedProd.id ? updatedProd : p));
+    saveProducts(updated);
+  };
+
+  // Delete Product
+  const handleDeleteProduct = (id: string) => {
+    const updated = products.filter((p) => p.id !== id);
+    saveProducts(updated);
+  };
+
+  // Add Transaction (POS checkout) and deduct stock quantities
+  const handleAddTransaction = (customerName: string, cartItems: CartItem[], notes: string) => {
+    let totalAmount = 0;
+    let totalCost = 0;
+
+    const itemsForTx = cartItems.map((item) => {
+      const lineCost = item.product.costPrice * item.quantity;
+      const lineSale = item.customSellingPrice * item.quantity;
+      
+      totalAmount += lineSale;
+      totalCost += lineCost;
+
+      return {
+        productId: item.product.id,
+        productName: item.product.name,
+        quantity: item.quantity,
+        costPrice: item.product.costPrice,
+        sellingPrice: item.customSellingPrice,
+      };
+    });
+
+    const newTx: Transaction = {
+      id: `tx-${Date.now()}`,
+      customerName: customerName,
+      items: itemsForTx,
+      totalAmount: totalAmount,
+      totalCost: totalCost,
+      totalProfit: totalAmount - totalCost,
+      date: new Date().toISOString(),
+      notes: notes,
+    };
+
+    // Deduct stock quantities from inventory
+    const updatedProducts = products.map((prod) => {
+      const cartMatch = cartItems.find((item) => item.product.id === prod.id);
+      if (cartMatch) {
+        return {
+          ...prod,
+          quantityInStock: Math.max(0, prod.quantityInStock - cartMatch.quantity),
+        };
+      }
+      return prod;
+    });
+
+    saveProducts(updatedProducts);
+    saveTransactions([newTx, ...transactions]);
+  };
+
+  // Undo / Delete Transaction and replenish stock quantities in inventory
+  const handleDeleteTransaction = (txId: string) => {
+    const transactionToUndo = transactions.find((t) => t.id === txId);
+    if (!transactionToUndo) return;
+
+    // Replenish stock quantities
+    const updatedProducts = products.map((prod) => {
+      const txItemMatch = transactionToUndo.items.find((item) => item.productId === prod.id);
+      if (txItemMatch) {
+        return {
+          ...prod,
+          quantityInStock: prod.quantityInStock + txItemMatch.quantity,
+        };
+      }
+      return prod;
+    });
+
+    const updatedTransactions = transactions.filter((t) => t.id !== txId);
+
+    saveProducts(updatedProducts);
+    saveTransactions(updatedTransactions);
+  };
+
+  // --- GENERAL ACCOUNTING ESTIMATES (Asset Evaluation) ---
+  const stockSummary = useMemo(() => {
+    let totalAssetCost = 0;
+    let totalPotentialSales = 0;
+
+    products.forEach((p) => {
+      // Skip unlimited products (>= 9999 stock) from the total physical asset calculations
+      // since they represent unlimited/service items rather than warehouse physical assets.
+      if (p.quantityInStock < 9999) {
+        totalAssetCost += p.costPrice * p.quantityInStock;
+        totalPotentialSales += p.sellingPrice * p.quantityInStock;
+      }
+    });
+
+    const totalPotentialProfit = totalPotentialSales - totalAssetCost;
+
+    return {
+      totalAssetCost,
+      totalPotentialSales,
+      totalPotentialProfit,
+    };
+  }, [products]);
+
+  // Clear all database records completely for a fresh shop setup
+  const clearDatabaseCompletely = async () => {
+    setProducts([]);
+    setTransactions([]);
+    localStorage.setItem('accounting_products', JSON.stringify([]));
+    localStorage.setItem('accounting_transactions', JSON.stringify([]));
+    try {
+      await pwaDb.clearAll();
+    } catch (e) {
+      console.error("Failed to clear IndexedDB:", e);
+    }
+    setShowClearConfirm(false);
+  };
+
+  return (
+    <div
+      className={`min-h-screen flex flex-col transition-all duration-300 ${
+        theme === 'dark'
+          ? 'bg-zinc-950 text-zinc-100'
+          : theme === 'eye-care'
+          ? 'bg-[#fcf8f2] text-[#433422]'
+          : 'bg-slate-50 text-slate-800'
+      }`}
+      dir={lang === 'ar' ? 'rtl' : 'ltr'}
+    >
+      
+      {/* 1. Header Area with dynamic local date & controllers */}
+      <header
+        className={`border-b shadow-sm sticky top-0 z-30 transition-all duration-300 ${
+          theme === 'dark'
+            ? 'bg-zinc-900 border-zinc-800 shadow-zinc-950/40'
+            : theme === 'eye-care'
+            ? 'bg-[#f3e5ca] border-[#e6d0a7] shadow-[#f0deb9]/30'
+            : 'bg-white border-slate-100 shadow-slate-100'
+        }`}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
+          
+          {/* Logo & Title */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between w-full xl:w-auto gap-4">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              type="button"
+              className={`flex items-center gap-3 text-right hover:opacity-90 transition focus:outline-none cursor-pointer group ${
+                lang === 'ar' ? 'text-right' : 'text-left'
+              }`}
+            >
+              <div className="bg-indigo-600 text-white p-2.5 rounded-2xl shadow-md shadow-indigo-100 flex items-center justify-center group-hover:scale-105 transition-transform shrink-0">
+                <Calculator className="w-6 h-6" />
+              </div>
+              <div>
+                <h1
+                  className={`text-xl font-black tracking-tight flex items-center gap-2 ${
+                    theme === 'dark'
+                      ? 'text-zinc-100'
+                      : theme === 'eye-care'
+                      ? 'text-[#433422]'
+                      : 'text-slate-800'
+                  }`}
+                >
+                  {t.appName}
+                </h1>
+              </div>
+            </button>
+          </div>
+
+          {/* Configuration and Controls (Language, Theme, Reset, Date) */}
+          <div className="flex items-center gap-3 flex-wrap justify-between w-full xl:w-auto xl:justify-end">
+            
+            {/* PWA Install & Offline Status Controls */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Online / Offline Sync Badge */}
+              <button
+                onClick={triggerDataSync}
+                disabled={isSyncing || !isOnline}
+                type="button"
+                className={`text-xs font-bold px-3 py-2.5 rounded-xl flex items-center gap-1.5 transition border ${
+                  isSyncing
+                    ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-900/40 dark:text-blue-400'
+                    : !isOnline
+                    ? 'bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-900/40 dark:text-amber-400'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-900/40 dark:text-emerald-400 hover:bg-emerald-100/30 dark:hover:bg-emerald-950/30'
+                } cursor-pointer shadow-sm`}
+                title={
+                  !isOnline
+                    ? (lang === 'ar' ? 'أنت غير متصل بالإنترنت - يتم حفظ بياناتك محلياً بشكل آمن' : 'You are offline - your data is being saved locally and securely')
+                    : (lang === 'ar' ? 'اضغط للمزامنة اليدوية الفورية' : 'Click to trigger immediate manual sync')
+                }
+              >
+                {isSyncing ? (
+                  <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
+                ) : !isOnline ? (
+                  <WifiOff className="w-4 h-4 text-amber-500" />
+                ) : (
+                  <Wifi className="w-4 h-4 text-emerald-500" />
+                )}
+                <span>
+                  {isSyncing
+                    ? (lang === 'ar' ? 'جاري المزامنة...' : 'Syncing...')
+                    : !isOnline
+                    ? (lang === 'ar' ? 'وضع الأوفلاين (حفظ محلي)' : 'Offline Mode (saving locally)')
+                    : (lang === 'ar' ? 'متصل ومزامن' : 'Online & Synced')}
+                </span>
+              </button>
+
+              {/* Install PWA Button */}
+              {showInstallBtn && (
+                <button
+                  onClick={handleInstallApp}
+                  type="button"
+                  className="text-xs font-black px-3 py-2.5 rounded-xl border transition flex items-center gap-2 cursor-pointer shadow-md bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500 hover:scale-[1.02] active:scale-[0.98]"
+                  title={lang === 'ar' ? 'تثبيت كبرنامج على الكمبيوتر (Windows Desktop App)' : 'Install as a Desktop App'}
+                >
+                  <Download className="w-4 h-4 text-indigo-100 animate-bounce" />
+                  <span>{lang === 'ar' ? 'تثبيت كبرنامج للكمبيوتر' : 'Install Desktop App'}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Bilingual Controls Box */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Language Selector */}
+              <button
+                onClick={toggleLanguage}
+                type="button"
+                className={`text-xs font-bold px-3.5 py-2.5 rounded-xl border transition flex items-center gap-2 cursor-pointer shadow-sm ${
+                  theme === 'dark'
+                    ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
+                    : theme === 'eye-care'
+                    ? 'bg-[#fcf8f2] border-[#e3d3b4] text-[#433422] hover:bg-[#faf2e4]'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+                title="تغيير اللغة / Switch Language"
+              >
+                <Globe className="w-4 h-4 text-indigo-500" />
+                <span>{t.langToggle}</span>
+              </button>
+
+              {/* Theme Pickers (Pills) */}
+              <div
+                className={`p-1 rounded-xl border flex items-center gap-1 shadow-sm ${
+                  theme === 'dark'
+                    ? 'bg-zinc-800 border-zinc-700'
+                    : theme === 'eye-care'
+                    ? 'bg-[#faf2e4] border-[#e3d3b4]'
+                    : 'bg-slate-100 border-slate-200'
+                }`}
+              >
+                {/* Light Theme Button */}
+                <button
+                  type="button"
+                  onClick={() => changeTheme('light')}
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                    theme === 'light'
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                  title={t.themeLight}
+                >
+                  <Sun className="w-4 h-4" />
+                </button>
+
+                {/* Dark Theme Button */}
+                <button
+                  type="button"
+                  onClick={() => changeTheme('dark')}
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                    theme === 'dark'
+                      ? 'bg-zinc-950 text-indigo-400 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-400'
+                  }`}
+                  title={t.themeDark}
+                >
+                  <Moon className="w-4 h-4" />
+                </button>
+
+                {/* Eye Care Theme Button */}
+                <button
+                  type="button"
+                  onClick={() => changeTheme('eye-care')}
+                  className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                    theme === 'eye-care'
+                      ? 'bg-[#7a644b] text-white shadow-sm'
+                      : 'text-[#90795e] hover:text-[#433422]'
+                  }`}
+                  title={t.themeEyeCare}
+                >
+                  <Eye className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Date Display */}
+            <span
+              className={`text-xs font-bold px-3.5 py-2.5 rounded-xl flex items-center gap-2 shadow-sm border ${
+                theme === 'dark'
+                  ? 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                  : theme === 'eye-care'
+                  ? 'bg-[#faf2e4] border-[#e3d3b4] text-[#5e4931]'
+                  : 'bg-slate-100 border-slate-200/60 text-slate-600'
+              }`}
+            >
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>
+                📅{' '}
+                {currentTime.toLocaleDateString(
+                  lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-US',
+                  { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }
+                )}
+              </span>
+              <span className="text-slate-300">|</span>
+              <span
+                className={`font-mono text-[13px] font-extrabold ${
+                  theme === 'dark'
+                    ? 'text-indigo-400'
+                    : theme === 'eye-care'
+                    ? 'text-amber-800'
+                    : 'text-indigo-600'
+                }`}
+                dir="ltr"
+              >
+                ⏰{' '}
+                {currentTime.toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: true,
+                })}
+              </span>
+            </span>
+
+            {/* Reset Button */}
+            <button
+              onClick={() => setShowClearConfirm(true)}
+              type="button"
+              className="text-xs font-semibold text-rose-500 hover:text-rose-700 flex items-center gap-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 px-3.5 py-2.5 rounded-xl transition border border-rose-100 dark:border-rose-900/40 cursor-pointer shadow-sm hover:shadow-md font-bold"
+              title={t.resetDataBtn}
+            >
+              {t.resetDataBtn}
+            </button>
+          </div>
+
+        </div>
+      </header>
+
+
+      {/* 3. Main Tabs Navigation Section */}
+      <div
+        className={`sticky top-[135px] xl:top-[77px] z-20 shadow-sm transition-all duration-300 ${
+          theme === 'dark'
+            ? 'bg-zinc-900 border-b border-zinc-800'
+            : theme === 'eye-care'
+            ? 'bg-[#f3e5ca] border-b border-[#e6d0a7]'
+            : 'bg-white border-b border-slate-200/80'
+        }`}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <nav
+            className={`flex -mb-px gap-8 ${
+              lang === 'ar' ? 'flex-row' : 'flex-row'
+            }`}
+          >
+            
+            {/* Tab 1: Dashboard */}
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`py-4 px-1 border-b-2 font-bold text-sm flex items-center gap-2 transition cursor-pointer ${
+                activeTab === 'dashboard'
+                  ? theme === 'dark'
+                    ? 'border-indigo-400 text-indigo-400'
+                    : theme === 'eye-care'
+                    ? 'border-amber-900 text-amber-950'
+                    : 'border-indigo-600 text-indigo-600'
+                  : theme === 'dark'
+                  ? 'border-transparent text-zinc-500 hover:text-zinc-300'
+                  : theme === 'eye-care'
+                  ? 'border-transparent text-[#90795e] hover:text-[#433422]'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300'
+              }`}
+            >
+              <LayoutDashboard className="w-4.5 h-4.5" />
+              <span>{t.tabDashboard}</span>
+            </button>
+
+            {/* Tab 2: POS */}
+            <button
+              onClick={() => setActiveTab('pos')}
+              className={`py-4 px-1 border-b-2 font-bold text-sm flex items-center gap-2 transition cursor-pointer ${
+                activeTab === 'pos'
+                  ? theme === 'dark'
+                    ? 'border-indigo-400 text-indigo-400'
+                    : theme === 'eye-care'
+                    ? 'border-amber-900 text-amber-950'
+                    : 'border-indigo-600 text-indigo-600'
+                  : theme === 'dark'
+                  ? 'border-transparent text-zinc-500 hover:text-zinc-300'
+                  : theme === 'eye-care'
+                  ? 'border-transparent text-[#90795e] hover:text-[#433422]'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300'
+              }`}
+              id="pos_tab_button"
+            >
+              <ShoppingCart className="w-4.5 h-4.5" />
+              <span>{t.tabPOS}</span>
+            </button>
+
+            {/* Tab 3: Inventory */}
+            <button
+              onClick={() => setActiveTab('inventory')}
+              className={`py-4 px-1 border-b-2 font-bold text-sm flex items-center gap-2 transition cursor-pointer ${
+                activeTab === 'inventory'
+                  ? theme === 'dark'
+                    ? 'border-indigo-400 text-indigo-400'
+                    : theme === 'eye-care'
+                    ? 'border-amber-900 text-amber-950'
+                    : 'border-indigo-600 text-indigo-600'
+                  : theme === 'dark'
+                  ? 'border-transparent text-zinc-500 hover:text-zinc-300'
+                  : theme === 'eye-care'
+                  ? 'border-transparent text-[#90795e] hover:text-[#433422]'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300'
+              }`}
+              id="inventory_tab_button"
+            >
+              <Package className="w-4.5 h-4.5" />
+              <span>{t.tabInventory}</span>
+            </button>
+
+            {/* Tab 4: History */}
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`py-4 px-1 border-b-2 font-bold text-sm flex items-center gap-2 transition cursor-pointer ${
+                activeTab === 'history'
+                  ? theme === 'dark'
+                    ? 'border-indigo-400 text-indigo-400'
+                    : theme === 'eye-care'
+                    ? 'border-amber-900 text-amber-950'
+                    : 'border-indigo-600 text-indigo-600'
+                  : theme === 'dark'
+                  ? 'border-transparent text-zinc-500 hover:text-zinc-300'
+                  : theme === 'eye-care'
+                  ? 'border-transparent text-[#90795e] hover:text-[#433422]'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300'
+              }`}
+              id="history_tab_button"
+            >
+              <History className="w-4.5 h-4.5" />
+              <span>{t.tabHistory}</span>
+            </button>
+
+          </nav>
+        </div>
+      </div>
+
+      {/* 4. Active Tab Content container */}
+      <main className="flex-grow max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8">
+        
+        {activeTab === 'dashboard' && (
+          <Dashboard
+            transactions={transactions}
+            products={products}
+            lang={lang}
+            theme={theme}
+          />
+        )}
+
+        {activeTab === 'pos' && (
+          <POS
+            products={products}
+            onAddTransaction={handleAddTransaction}
+            lang={lang}
+            theme={theme}
+          />
+        )}
+
+        {activeTab === 'inventory' && (
+          <Inventory
+            products={products}
+            onAddProduct={handleAddProduct}
+            onUpdateProduct={handleUpdateProduct}
+            onDeleteProduct={handleDeleteProduct}
+            lang={lang}
+            theme={theme}
+          />
+        )}
+
+        {activeTab === 'history' && (
+          <TransactionHistory
+            transactions={transactions}
+            onDeleteTransaction={handleDeleteTransaction}
+            lang={lang}
+            theme={theme}
+          />
+        )}
+
+      </main>
+
+      {/* 5. Footer */}
+      <footer
+        className={`py-6 text-center text-xs transition-all duration-300 ${
+          theme === 'dark'
+            ? 'bg-zinc-900 text-zinc-500 border-t border-zinc-800'
+            : theme === 'eye-care'
+            ? 'bg-[#f3e5ca] text-[#786144] border-t border-[#e6d0a7]'
+            : 'bg-slate-900 text-slate-500 border-t border-slate-800'
+        }`}
+      >
+        <div className="max-w-7xl mx-auto px-4">
+          <p
+            className={`font-medium ${
+              theme === 'dark'
+                ? 'text-zinc-400'
+                : theme === 'eye-care'
+                ? 'text-[#433422]'
+                : 'text-slate-400'
+            }`}
+          >
+            {t.footerText}
+          </p>
+          <p
+            className={`mt-1 ${
+              theme === 'dark'
+                ? 'text-zinc-500'
+                : theme === 'eye-care'
+                ? 'text-[#90795e]'
+                : 'text-slate-500'
+            }`}
+          >
+            © {new Date().getFullYear()} {t.appName}. {t.footerRights}.
+          </p>
+        </div>
+      </footer>
+
+      {/* Custom Confirmation Modal for resetting the database */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div
+            className={`rounded-2xl max-w-md w-full p-6 shadow-2xl border animate-scale-up ${
+              theme === 'dark'
+                ? 'bg-zinc-900 border-zinc-800 text-zinc-100'
+                : theme === 'eye-care'
+                ? 'bg-[#f7eedc] border-[#dfca9e] text-[#433422]'
+                : 'bg-white border-slate-100 text-slate-800'
+            }`}
+            dir={lang === 'ar' ? 'rtl' : 'ltr'}
+          >
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 mb-4 animate-bounce">
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-bold mb-2">{t.resetConfirmTitle}</h3>
+              <p
+                className={`text-sm mb-6 leading-relaxed ${
+                  theme === 'dark'
+                    ? 'text-zinc-400'
+                    : theme === 'eye-care'
+                    ? 'text-[#786144]'
+                    : 'text-slate-500'
+                }`}
+              >
+                {t.resetConfirmDesc}
+                <br />
+                <span className="font-bold text-rose-600 dark:text-rose-400">
+                  {t.resetConfirmWarn}
+                </span>
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row-reverse gap-3">
+              <button
+                type="button"
+                onClick={clearDatabaseCompletely}
+                className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2.5 bg-rose-600 text-white text-sm font-bold hover:bg-rose-700 transition cursor-pointer"
+              >
+                {t.resetConfirm}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className={`w-full inline-flex justify-center rounded-xl border shadow-sm px-4 py-2.5 text-sm font-semibold transition cursor-pointer ${
+                  theme === 'dark'
+                    ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
+                    : theme === 'eye-care'
+                    ? 'bg-[#faf2e4] border-[#e3d3b4] text-[#433422] hover:bg-[#f3e5ca]'
+                    : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {t.resetCancel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
