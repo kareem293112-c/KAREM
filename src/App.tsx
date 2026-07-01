@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { Product, Transaction, CartItem } from './types';
 import Dashboard from './components/Dashboard';
 import POS from './components/POS';
@@ -7,23 +8,9 @@ import TransactionHistory from './components/TransactionHistory';
 import { LayoutDashboard, ShoppingCart, Package, History, Calculator, HelpCircle, Layers, Globe, Sun, Moon, Eye, Wifi, WifiOff, Download, RefreshCw, AlertTriangle, Menu, X, Info } from 'lucide-react';
 import { translations } from './translations';
 import { pwaDb } from './db/pwaDb';
-import { useRegisterSW } from 'virtual:pwa-register/react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
-  // --- PWA UPDATE LOGIC ---
-  const {
-    needRefresh: [needRefresh, setNeedRefresh],
-    updateServiceWorker,
-  } = useRegisterSW({
-    onRegistered(r) {
-      console.log(`[PWA] SW Registered: ${r}`);
-    },
-    onRegisterError(error) {
-      console.log(`[PWA] SW Registration error: ${error}`);
-    },
-  });
-
   // --- STATE ---
   const [showSidebar, setShowSidebar] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
@@ -32,11 +19,34 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  // PWA and Online/Offline state variables
+  // Print-specific active transaction states
+  const [printActiveTransaction, setPrintActiveTransaction] = useState<Transaction | null>(null);
+  const [printReceivedAmount, setPrintReceivedAmount] = useState<number>(0);
+
+  const triggerPrint = (tx: Transaction, received = 0) => {
+    try {
+      // Force React to commit the print states synchronously to the DOM
+      flushSync(() => {
+        setPrintActiveTransaction(tx);
+        setPrintReceivedAmount(received);
+      });
+      
+      // Execute the print command synchronously in the same user gesture thread
+      window.print();
+    } catch (printError) {
+      console.warn("Printing triggered synchronously, but could be restricted in this iframe container:", printError);
+      // Fallback: Still try printing without flushSync just in case
+      try {
+        window.print();
+      } catch (innerError) {
+        console.error("Print command completely blocked by browser/sandbox:", innerError);
+      }
+    }
+  };
+
+  // Online/Offline state variables
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallBtn, setShowInstallBtn] = useState(false);
 
   const [lang, setLang] = useState<'ar' | 'en'>(() => {
     return (localStorage.getItem('accounting_lang') as 'ar' | 'en') || 'ar';
@@ -67,7 +77,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Listen to network status & beforeinstallprompt
+  // Listen to network status
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
@@ -80,18 +90,9 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowInstallBtn(true);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
 
@@ -134,14 +135,7 @@ export default function App() {
     }
   };
 
-  const handleInstallApp = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    console.log(`User response to install prompt: ${outcome}`);
-    setDeferredPrompt(null);
-    setShowInstallBtn(false);
-  };
+  // Standard cloud sync mechanism (IndexedDB backup)
 
   // --- INITIALIZATION (LocalStorage & IndexedDB Dual Load with safe migration) ---
   useEffect(() => {
@@ -272,7 +266,7 @@ export default function App() {
   };
 
   // Add Transaction (POS checkout) and deduct stock quantities
-  const handleAddTransaction = (customerName: string, cartItems: CartItem[], notes: string) => {
+  const handleAddTransaction = (customerName: string, cartItems: CartItem[], notes: string): Transaction => {
     let totalAmount = 0;
     let totalCost = 0;
 
@@ -317,6 +311,7 @@ export default function App() {
 
     saveProducts(updatedProducts);
     saveTransactions([newTx, ...transactions]);
+    return newTx;
   };
 
   // Undo / Delete Transaction and replenish stock quantities in inventory
@@ -380,16 +375,17 @@ export default function App() {
   };
 
   return (
-    <div
-      className={`min-h-screen flex flex-col transition-all duration-300 ${
-        theme === 'dark'
-          ? 'bg-zinc-950 text-zinc-100'
-          : theme === 'eye-care'
-          ? 'bg-[#fcf8f2] text-[#433422]'
-          : 'bg-slate-50 text-slate-800'
-      }`}
-      dir={lang === 'ar' ? 'rtl' : 'ltr'}
-    >
+    <>
+      <div
+        className={`print:hidden min-h-screen flex flex-col transition-all duration-300 ${
+          theme === 'dark'
+            ? 'bg-zinc-950 text-zinc-100'
+            : theme === 'eye-care'
+            ? 'bg-[#fcf8f2] text-[#433422]'
+            : 'bg-slate-50 text-slate-800'
+        }`}
+        dir={lang === 'ar' ? 'rtl' : 'ltr'}
+      >
       
       {/* 1. Header Area with dynamic local date & controllers */}
       <header
@@ -506,12 +502,6 @@ export default function App() {
                   } absolute bottom-0`}
                 />
               </div>
-              {needRefresh && !showSidebar && (
-                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500"></span>
-                </span>
-              )}
             </button>
           </div>
 
@@ -645,6 +635,7 @@ export default function App() {
           <POS
             products={products}
             onAddTransaction={handleAddTransaction}
+            onPrintTransaction={triggerPrint}
             lang={lang}
             theme={theme}
           />
@@ -665,6 +656,7 @@ export default function App() {
           <TransactionHistory
             transactions={transactions}
             onDeleteTransaction={handleDeleteTransaction}
+            onPrintTransaction={triggerPrint}
             lang={lang}
             theme={theme}
           />
@@ -901,50 +893,6 @@ export default function App() {
                         </span>
                       </button>
 
-                      {/* Install PWA Desktop button */}
-                      {showInstallBtn && (
-                        <button
-                          onClick={handleInstallApp}
-                          type="button"
-                          className="w-full text-xs font-black px-3 py-3 rounded-xl border transition flex items-center justify-center gap-2 cursor-pointer shadow-md bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-500 hover:scale-[1.02] active:scale-[0.98]"
-                        >
-                          <Download className="w-4 h-4 text-indigo-100 animate-bounce" />
-                          <span>{lang === 'ar' ? 'تثبيت كبرنامج للكمبيوتر' : 'Install Desktop App'}</span>
-                        </button>
-                      )}
-
-                      {/* Manual PWA Update status */}
-                      <div className="pt-2 border-t border-slate-100 dark:border-zinc-800/80">
-                        <div className="flex items-center gap-2 mb-2 text-xs font-bold text-slate-500 dark:text-zinc-400">
-                          <RefreshCw className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{lang === 'ar' ? 'تحديثات النظام:' : 'System Updates:'}</span>
-                        </div>
-
-                        {needRefresh ? (
-                          <div className="space-y-3">
-                            <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-xl flex items-center gap-2.5">
-                              <AlertTriangle className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-                              <p className="text-xs font-bold text-indigo-900 dark:text-indigo-200">
-                                {lang === 'ar' ? 'يتوفر تحديث جديد وجاهز للتثبيت' : 'A new update is available and ready'}
-                              </p>
-                            </div>
-                            <button
-                              onClick={() => {
-                                updateServiceWorker(true);
-                                setShowSidebar(false);
-                              }}
-                              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-xl transition cursor-pointer shadow-md flex items-center justify-center gap-2"
-                            >
-                              <span>{lang === 'ar' ? 'تثبيت التحديث الآن' : 'Install Update Now'}</span>
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2 text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
-                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                            <span>{lang === 'ar' ? 'أنت تستخدم أحدث إصدار من النظام' : 'Using latest system version'}</span>
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
 
@@ -1117,5 +1065,123 @@ export default function App() {
       )}
 
     </div>
+
+    {/* Elegant Printable Thermal/A4 Receipt Slip */}
+    {printActiveTransaction && (
+      <div 
+        className="hidden print:block text-black bg-white w-full max-w-[80mm] mx-auto p-2 font-sans select-none leading-normal border-0" 
+        dir={lang === 'ar' ? 'rtl' : 'ltr'}
+        style={{ fontFamily: "'Cairo', system-ui, -apple-system, sans-serif" }}
+      >
+        <div className="text-center space-y-1">
+          <h2 className="text-base font-extrabold tracking-tight text-black">
+            {lang === 'ar' ? 'نظام المحاسب الذكي' : 'Smart Accountant'}
+          </h2>
+          <p className="text-[10px] text-zinc-700 font-bold">
+            {lang === 'ar' ? 'سند مبيعات مبسط' : 'Simplified Sales Receipt'}
+          </p>
+          <div className="border-b border-dashed border-black my-2"></div>
+        </div>
+
+        <div className="space-y-1 text-[10px] text-black">
+          <div className="flex justify-between">
+            <span className="font-bold">{lang === 'ar' ? 'رقم الفاتورة:' : 'Invoice No:'}</span>
+            <span className="font-mono">{printActiveTransaction.id}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="font-bold">{lang === 'ar' ? 'التاريخ والوقت:' : 'Date & Time:'}</span>
+            <span className="font-mono">
+              {new Date(printActiveTransaction.date).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+                year: 'numeric',
+                month: 'numeric',
+                day: 'numeric',
+              })}{' '}
+              {new Date(printActiveTransaction.date).toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="font-bold">{lang === 'ar' ? 'العميل:' : 'Customer:'}</span>
+            <span>{printActiveTransaction.customerName}</span>
+          </div>
+          {printActiveTransaction.notes && (
+            <div className="flex justify-between">
+              <span className="font-bold">{lang === 'ar' ? 'ملاحظات:' : 'Notes:'}</span>
+              <span>{printActiveTransaction.notes}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="border-b border-dashed border-black my-2"></div>
+
+        {/* Products Table */}
+        <table className="w-full text-[10px] text-black border-collapse">
+          <thead>
+            <tr className="border-b border-dashed border-black font-extrabold">
+              <th className="pb-1 text-right">{lang === 'ar' ? 'السلعة' : 'Item'}</th>
+              <th className="pb-1 text-center">{lang === 'ar' ? 'الكمية' : 'Qty'}</th>
+              <th className="pb-1 text-left">{lang === 'ar' ? 'السعر' : 'Price'}</th>
+              <th className="pb-1 text-left">{lang === 'ar' ? 'الإجمالي' : 'Total'}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-dashed divide-zinc-300">
+            {printActiveTransaction.items.map((item, idx) => (
+              <tr key={idx} className="py-1">
+                <td className="py-1.5 align-middle font-semibold">{item.productName}</td>
+                <td className="py-1.5 text-center align-middle font-mono">{item.quantity}</td>
+                <td className="py-1.5 text-left align-middle font-mono">{item.sellingPrice.toLocaleString()}</td>
+                <td className="py-1.5 text-left align-middle font-mono font-bold">
+                  {(item.sellingPrice * item.quantity).toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="border-b border-dashed border-black my-2"></div>
+
+        {/* Totals Summary */}
+        <div className="space-y-1 text-black">
+          <div className="flex justify-between items-center text-xs font-black py-0.5">
+            <span>{lang === 'ar' ? 'الإجمالي الكلي:' : 'Grand Total:'}</span>
+            <span className="font-mono text-sm">
+              {printActiveTransaction.totalAmount.toLocaleString()} {t.currency}
+            </span>
+          </div>
+          {printReceivedAmount > 0 && (
+            <>
+              <div className="flex justify-between items-center text-[10px] py-0.5">
+                <span>{lang === 'ar' ? 'المبلغ المستلم:' : 'Amount Paid:'}</span>
+                <span className="font-mono">{printReceivedAmount.toLocaleString()} {t.currency}</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] py-0.5">
+                <span>
+                  {printReceivedAmount >= printActiveTransaction.totalAmount
+                    ? (lang === 'ar' ? 'المبلغ المرتجع (الباقي):' : 'Change Due:')
+                    : (lang === 'ar' ? 'المتبقي (عجز):' : 'Remaining:')}
+                </span>
+                <span className="font-mono font-bold">
+                  {Math.abs(printReceivedAmount - printActiveTransaction.totalAmount).toLocaleString()} {t.currency}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="border-b border-dashed border-black my-2.5"></div>
+
+        {/* Footer Messages */}
+        <div className="text-center text-[9px] text-zinc-700 space-y-1">
+          <p className="font-extrabold text-black">{lang === 'ar' ? 'شكراً لتعاملكم معنا!' : 'Thank you for your business!'}</p>
+          <p>{lang === 'ar' ? 'يسعدنا دائماً زيارتكم وخدمتكم.' : 'We look forward to serving you again.'}</p>
+          <div className="text-[8px] opacity-65 pt-1">
+            {lang === 'ar' ? 'تاريخ الطباعة:' : 'Printed on:'} {new Date().toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')}
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   );
 }

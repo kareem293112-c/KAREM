@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { Product, CartItem, Transaction } from '../types';
-import { Search, ShoppingCart, User, Plus, Minus, Trash2, AlertCircle, TrendingUp, CheckCircle, Percent } from 'lucide-react';
+import { Search, ShoppingCart, User, Plus, Minus, Trash2, AlertCircle, TrendingUp, CheckCircle, Percent, Printer, FileText, X } from 'lucide-react';
 import { translations } from '../translations';
 
 interface POSProps {
   products: Product[];
-  onAddTransaction: (customerName: string, items: CartItem[], notes: string) => void;
+  onAddTransaction: (customerName: string, items: CartItem[], notes: string) => Transaction;
+  onPrintTransaction: (tx: Transaction, received: number) => void;
   lang: 'ar' | 'en';
   theme: 'light' | 'dark' | 'eye-care';
 }
 
-export default function POS({ products, onAddTransaction, lang, theme }: POSProps) {
+export default function POS({ products, onAddTransaction, onPrintTransaction, lang, theme }: POSProps) {
   const t = translations[lang];
 
   const [customerName, setCustomerName] = useState('');
@@ -20,6 +21,11 @@ export default function POS({ products, onAddTransaction, lang, theme }: POSProp
   const [errorMessage, setErrorMessage] = useState('');
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [receivedAmount, setReceivedAmount] = useState('');
+
+  // Interactive printable invoice receipt modal state
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [lastCompletedTx, setLastCompletedTx] = useState<Transaction | null>(null);
+  const [lastReceivedAmount, setLastReceivedAmount] = useState<number>(0);
 
   // Filter products by search query
   const filteredProducts = useMemo(() => {
@@ -133,7 +139,12 @@ export default function POS({ products, onAddTransaction, lang, theme }: POSProp
     }
 
     const clientName = customerName.trim() || (lang === 'ar' ? 'زبون عام' : 'General Customer');
-    onAddTransaction(clientName, cart, notes);
+    const newTx = onAddTransaction(clientName, cart, notes);
+    
+    // Save context for immediate post-sale receipt & print popup
+    setLastCompletedTx(newTx);
+    setLastReceivedAmount(receivedAmount ? parseFloat(receivedAmount) : 0);
+    setShowReceiptModal(true);
     
     // Clear State
     setCart([]);
@@ -579,6 +590,168 @@ export default function POS({ products, onAddTransaction, lang, theme }: POSProp
         </form>
 
       </div>
+
+      {/* 4. Interactive Post-Checkout Receipt Preview Modal */}
+      {showReceiptModal && lastCompletedTx && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div 
+            className={`w-full max-w-md overflow-hidden rounded-2xl shadow-2xl flex flex-col max-h-[92vh] border transition-all duration-300 ${
+              theme === 'dark' 
+                ? 'bg-zinc-900 border-zinc-800 text-zinc-100' 
+                : theme === 'eye-care' 
+                ? 'bg-[#fcf8f2] border-[#e6d0a7] text-[#433422]' 
+                : 'bg-white border-slate-100 text-slate-800'
+            }`}
+          >
+            {/* Modal Header */}
+            <div className={`p-5 text-center border-b flex flex-col items-center gap-2 ${
+              theme === 'dark' ? 'border-zinc-800 bg-zinc-900/50' : theme === 'eye-care' ? 'border-[#dfca9e] bg-[#f5ebd6]' : 'border-slate-100 bg-slate-50/50'
+            }`}>
+              <div className="p-3 bg-emerald-100 dark:bg-emerald-950/40 rounded-full text-emerald-600 dark:text-emerald-400">
+                <CheckCircle className="w-8 h-8 animate-bounce" />
+              </div>
+              <div>
+                <h3 className="text-base font-extrabold">
+                  {lang === 'ar' ? 'تمت عملية البيع بنجاح!' : 'Checkout Completed Successfully!'}
+                </h3>
+                <p className="text-[11px] text-slate-400 dark:text-zinc-400 mt-1">
+                  {lang === 'ar' 
+                    ? 'تم تسجيل الفاتورة وتعديل المخازن وتجهيز أمر الطباعة.' 
+                    : 'Invoice recorded, stock deducted and print commands initialized.'}
+                </p>
+              </div>
+            </div>
+
+            {/* Live Receipt Scrollable Preview */}
+            <div className="p-5 flex-1 overflow-y-auto bg-slate-100/50 dark:bg-zinc-950/30">
+              <span className="block text-[11px] font-bold mb-2 text-slate-500 dark:text-zinc-400">
+                {lang === 'ar' ? 'معاينة الفاتورة الحرارية (80mm):' : 'Thermal Receipt Preview (80mm):'}
+              </span>
+              
+              {/* Paper Slip */}
+              <div className="bg-white text-black p-4 rounded-xl shadow-sm border border-slate-200 text-xs text-right leading-relaxed select-none font-sans" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+                <div className="text-center space-y-1 mb-3">
+                  <h4 className="text-sm font-extrabold text-black">
+                    {lang === 'ar' ? 'نظام المحاسب الذكي' : 'Smart Accountant'}
+                  </h4>
+                  <p className="text-[9px] text-zinc-500">
+                    {lang === 'ar' ? 'سند مبيعات مبسط' : 'Simplified Sales Receipt'}
+                  </p>
+                  <div className="border-b border-dashed border-zinc-400 my-1"></div>
+                </div>
+
+                <div className="space-y-1 text-[9px] text-zinc-700">
+                  <div className="flex justify-between">
+                    <span>{lang === 'ar' ? 'رقم الفاتورة:' : 'Invoice No:'}</span>
+                    <span className="font-mono font-bold text-black">{lastCompletedTx.id}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>{lang === 'ar' ? 'التاريخ والوقت:' : 'Date & Time:'}</span>
+                    <span className="font-mono text-black">
+                      {new Date(lastCompletedTx.date).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US')} {' '}
+                      {new Date(lastCompletedTx.date).toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'en-US', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>{lang === 'ar' ? 'العميل:' : 'Customer:'}</span>
+                    <span className="text-black font-semibold">{lastCompletedTx.customerName}</span>
+                  </div>
+                  {lastCompletedTx.notes && (
+                    <div className="flex justify-between">
+                      <span>{lang === 'ar' ? 'ملاحظات:' : 'Notes:'}</span>
+                      <span className="text-black">{lastCompletedTx.notes}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="border-b border-dashed border-zinc-400 my-2"></div>
+
+                {/* Table */}
+                <table className="w-full text-[9px] border-collapse text-zinc-800">
+                  <thead>
+                    <tr className="border-b border-dashed border-zinc-400 text-black font-bold">
+                      <th className="pb-1 text-right">{lang === 'ar' ? 'السلعة' : 'Item'}</th>
+                      <th className="pb-1 text-center">{lang === 'ar' ? 'الكمية' : 'Qty'}</th>
+                      <th className="pb-1 text-left">{lang === 'ar' ? 'السعر' : 'Price'}</th>
+                      <th className="pb-1 text-left">{lang === 'ar' ? 'الإجمالي' : 'Total'}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lastCompletedTx.items.map((item, idx) => (
+                      <tr key={idx} className="border-b border-dashed border-zinc-100">
+                        <td className="py-1 text-right text-black font-medium">{item.productName}</td>
+                        <td className="py-1 text-center font-mono">{item.quantity}</td>
+                        <td className="py-1 text-left font-mono">{item.sellingPrice.toLocaleString()}</td>
+                        <td className="py-1 text-left font-mono text-black font-bold">{(item.sellingPrice * item.quantity).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <div className="border-b border-dashed border-zinc-400 my-2"></div>
+
+                <div className="space-y-0.5 text-[9px]">
+                  <div className="flex justify-between font-extrabold text-black text-xs">
+                    <span>{lang === 'ar' ? 'الإجمالي الكلي:' : 'Grand Total:'}</span>
+                    <span className="font-mono">{lastCompletedTx.totalAmount.toLocaleString()} {t.currency}</span>
+                  </div>
+                  {lastReceivedAmount > 0 && (
+                    <>
+                      <div className="flex justify-between text-zinc-600">
+                        <span>{lang === 'ar' ? 'المبلغ المستلم:' : 'Amount Paid:'}</span>
+                        <span className="font-mono">{lastReceivedAmount.toLocaleString()} {t.currency}</span>
+                      </div>
+                      <div className="flex justify-between text-zinc-700 font-bold">
+                        <span>
+                          {lastReceivedAmount >= lastCompletedTx.totalAmount
+                            ? (lang === 'ar' ? 'الباقي للمرتجع:' : 'Change Due:')
+                            : (lang === 'ar' ? 'المتبقي كعجز:' : 'Remaining:')}
+                        </span>
+                        <span className="font-mono text-black">
+                          {Math.abs(lastReceivedAmount - lastCompletedTx.totalAmount).toLocaleString()} {t.currency}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className={`p-5 border-t flex flex-col gap-3 ${
+              theme === 'dark' ? 'border-zinc-800 bg-zinc-900/40' : theme === 'eye-care' ? 'border-[#dfca9e] bg-[#f5ebd6]/40' : 'border-slate-100 bg-slate-50/40'
+            }`}>
+              <button
+                onClick={() => onPrintTransaction(lastCompletedTx, lastReceivedAmount)}
+                type="button"
+                className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white shadow-md flex items-center justify-center gap-2 hover:scale-[1.01] transition duration-150 cursor-pointer"
+              >
+                <Printer className="w-5 h-5" />
+                {lang === 'ar' ? 'طباعة الفاتورة الحرارية' : 'Print Thermal Invoice'}
+              </button>
+              
+              <button
+                onClick={() => {
+                  setShowReceiptModal(false);
+                  setLastCompletedTx(null);
+                  setLastReceivedAmount(0);
+                }}
+                type="button"
+                className={`w-full py-3 px-4 rounded-xl font-bold text-sm border transition flex items-center justify-center gap-2 cursor-pointer ${
+                  theme === 'dark'
+                    ? 'bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-300'
+                    : theme === 'eye-care'
+                    ? 'bg-[#faf2e4] hover:bg-[#ebdcc3] border-[#dfca9e] text-[#433422]'
+                    : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+                }`}
+              >
+                <X className="w-4 h-4" />
+                {lang === 'ar' ? 'بدء عملية بيع جديدة' : 'Start New Sale'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

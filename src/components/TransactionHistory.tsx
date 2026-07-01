@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { Transaction } from '../types';
-import { Calendar, User, Search, Trash2, ChevronDown, ChevronUp, FileText, CheckCircle, TrendingUp, DollarSign, PackageOpen, Undo2 } from 'lucide-react';
+import { Calendar, User, Search, Trash2, ChevronDown, ChevronUp, FileText, CheckCircle, TrendingUp, DollarSign, PackageOpen, Undo2, Printer } from 'lucide-react';
 import { translations } from '../translations';
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
   onDeleteTransaction: (id: string) => void;
+  onPrintTransaction: (tx: Transaction, received: number) => void;
   lang: 'ar' | 'en';
   theme: 'light' | 'dark' | 'eye-care';
 }
 
-export default function TransactionHistory({ transactions, onDeleteTransaction, lang, theme }: TransactionHistoryProps) {
+export default function TransactionHistory({ transactions, onDeleteTransaction, onPrintTransaction, lang, theme }: TransactionHistoryProps) {
   const t = translations[lang];
 
   const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
@@ -415,12 +416,25 @@ export default function TransactionHistory({ transactions, onDeleteTransaction, 
                         })}
                       </div>
 
-                      <div className={`pt-2 border-t flex justify-between text-[11px] font-bold flex-wrap gap-2 ${
-                        theme === 'dark' ? 'border-zinc-800 text-zinc-300' : theme === 'eye-care' ? 'border-[#dfca9e] text-[#433422]' : 'border-slate-200 text-slate-500'
+                      <div className={`pt-2 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                        theme === 'dark' ? 'border-zinc-800' : theme === 'eye-care' ? 'border-[#dfca9e]' : 'border-slate-200'
                       }`}>
-                        <span>{t.posTotalAmount}: {tx.totalAmount.toLocaleString(localeCode, { maximumFractionDigits: 1 })} {t.currency}</span>
-                        <span>{t.posTotalCost}: {tx.totalCost.toLocaleString(localeCode, { maximumFractionDigits: 1 })} {t.currency}</span>
-                        <span className="text-emerald-600 dark:text-emerald-400">{t.posNetProfit}: {tx.totalProfit.toLocaleString(localeCode, { maximumFractionDigits: 1 })} {t.currency}</span>
+                        <div className={`flex flex-wrap gap-4 text-[11px] font-bold ${
+                          theme === 'dark' ? 'text-zinc-300' : theme === 'eye-care' ? 'text-[#433422]' : 'text-slate-500'
+                        }`}>
+                          <span>{t.posTotalAmount}: {tx.totalAmount.toLocaleString(localeCode, { maximumFractionDigits: 1 })} {t.currency}</span>
+                          <span>{t.posTotalCost}: {tx.totalCost.toLocaleString(localeCode, { maximumFractionDigits: 1 })} {t.currency}</span>
+                          <span className="text-emerald-600 dark:text-emerald-400">{t.posNetProfit}: {tx.totalProfit.toLocaleString(localeCode, { maximumFractionDigits: 1 })} {t.currency}</span>
+                        </div>
+                        
+                        <button
+                          onClick={() => onPrintTransaction(tx, tx.totalAmount)}
+                          type="button"
+                          className="px-3.5 py-1.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition hover:scale-[1.02] active:scale-[0.98] cursor-pointer bg-emerald-600 border-emerald-500 text-white hover:bg-emerald-700 shadow-sm"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'طباعة الفاتورة' : 'Print Invoice'}</span>
+                        </button>
                       </div>
                     </div>
                   )}

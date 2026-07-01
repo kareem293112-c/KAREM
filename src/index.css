@@ -38,3 +38,27 @@ body {
   background: #94a3b8;
 }
 
+/* Custom Print Formatting Rules */
+@media print {
+  @page {
+    margin: 0mm 4mm;
+    size: auto;
+  }
+  html, body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Cairo', system-ui, -apple-system, sans-serif !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  /* Remove page header/footer markers (like URL or date) injected by browsers */
+  header, footer, nav, aside {
+    display: none !important;
+  }
+}
+
+
