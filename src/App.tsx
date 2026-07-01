@@ -429,49 +429,91 @@ export default function App() {
             </div>
           </button>
 
-          {/* Hamburger Menu (3 lines) Button */}
-          <button
-            onClick={() => setShowSidebar(!showSidebar)}
-            type="button"
-            className={`relative p-3 rounded-2xl border transition duration-200 flex items-center justify-center shadow-sm cursor-pointer hover:scale-105 active:scale-95 z-[110] ${
-              theme === 'dark'
-                ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700 hover:text-white'
-                : theme === 'eye-care'
-                ? 'bg-[#faf2e4] border-[#e3d3b4] text-[#433422] hover:bg-[#ebdcc0]'
-                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-            }`}
-            title={lang === 'ar' ? 'القائمة الجانبية وإعدادات النظام' : 'Sidebar & System Settings'}
-          >
-            <div className="w-5 h-4 flex flex-col justify-between items-center relative">
-              <motion.span
-                animate={showSidebar ? { rotate: 45, y: 7 } : { rotate: 0, y: 0 }}
-                transition={{ duration: 0.25 }}
-                className={`w-5 h-0.5 rounded-full ${
-                  theme === 'eye-care' ? 'bg-[#433422]' : 'bg-current'
-                } absolute top-0`}
-              />
-              <motion.span
-                animate={showSidebar ? { opacity: 0, scale: 0 } : { opacity: 1, scale: 1 }}
-                transition={{ duration: 0.2 }}
-                className={`w-5 h-0.5 rounded-full ${
-                  theme === 'eye-care' ? 'bg-[#433422]' : 'bg-current'
-                } absolute top-[7px]`}
-              />
-              <motion.span
-                animate={showSidebar ? { rotate: -45, y: -7 } : { rotate: 0, y: 0 }}
-                transition={{ duration: 0.25 }}
-                className={`w-5 h-0.5 rounded-full ${
-                  theme === 'eye-care' ? 'bg-[#433422]' : 'bg-current'
-                } absolute bottom-0`}
-              />
-            </div>
-            {needRefresh && !showSidebar && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500"></span>
+          {/* Middle/Right: Date Display and Hamburger */}
+          <div className="flex items-center gap-3">
+            {/* Quick Date Display */}
+            <span
+              className={`hidden sm:flex text-xs font-bold px-3.5 py-2.5 rounded-xl items-center gap-2 shadow-sm border ${
+                theme === 'dark'
+                  ? 'bg-zinc-800 border-zinc-700 text-zinc-300'
+                  : theme === 'eye-care'
+                  ? 'bg-[#faf2e4] border-[#e3d3b4] text-[#5e4931]'
+                  : 'bg-slate-100 border-slate-200/60 text-slate-600'
+              }`}
+            >
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>
+                📅{' '}
+                {currentTime.toLocaleDateString(
+                  lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-US',
+                  { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }
+                )}
               </span>
-            )}
-          </button>
+              <span className="text-slate-300">|</span>
+              <span
+                className={`font-mono text-[13px] font-extrabold ${
+                  theme === 'dark'
+                    ? 'text-indigo-400'
+                    : theme === 'eye-care'
+                    ? 'text-amber-800'
+                    : 'text-indigo-600'
+                }`}
+                dir="ltr"
+              >
+                ⏰{' '}
+                {currentTime.toLocaleTimeString('en-US', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  second: '2-digit',
+                  hour12: true,
+                })}
+              </span>
+            </span>
+
+            {/* Hamburger Menu (3 lines) Button */}
+            <button
+              onClick={() => setShowSidebar(!showSidebar)}
+              type="button"
+              className={`relative p-3 rounded-2xl border transition duration-200 flex items-center justify-center shadow-sm cursor-pointer hover:scale-105 active:scale-95 z-[110] ${
+                theme === 'dark'
+                  ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700 hover:text-white'
+                  : theme === 'eye-care'
+                  ? 'bg-[#faf2e4] border-[#e3d3b4] text-[#433422] hover:bg-[#ebdcc0]'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+              title={lang === 'ar' ? 'القائمة الجانبية وإعدادات النظام' : 'Sidebar & System Settings'}
+            >
+              <div className="w-5 h-4 flex flex-col justify-between items-center relative">
+                <motion.span
+                  animate={showSidebar ? { rotate: 45, y: 7 } : { rotate: 0, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className={`w-5 h-0.5 rounded-full ${
+                    theme === 'eye-care' ? 'bg-[#433422]' : 'bg-current'
+                  } absolute top-0`}
+                />
+                <motion.span
+                  animate={showSidebar ? { opacity: 0, scale: 0 } : { opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.2 }}
+                  className={`w-5 h-0.5 rounded-full ${
+                    theme === 'eye-care' ? 'bg-[#433422]' : 'bg-current'
+                  } absolute top-[7px]`}
+                />
+                <motion.span
+                  animate={showSidebar ? { rotate: -45, y: -7 } : { rotate: 0, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className={`w-5 h-0.5 rounded-full ${
+                    theme === 'eye-care' ? 'bg-[#433422]' : 'bg-current'
+                  } absolute bottom-0`}
+                />
+              </div>
+              {needRefresh && !showSidebar && (
+                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500"></span>
+                </span>
+              )}
+            </button>
+          </div>
 
         </div>
       </header>
