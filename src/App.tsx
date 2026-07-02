@@ -22,6 +22,50 @@ export default function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  // --- PWA INSTALLATION STATES & LOGIC ---
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setIsInstallable(false);
+      console.log('[PWA] App was successfully installed!');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+
+    // Check if app is already running in standalone mode
+    if (window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone) {
+      setIsInstallable(false);
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    try {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`[PWA] Installation choice: ${outcome}`);
+      setDeferredPrompt(null);
+      setIsInstallable(false);
+    } catch (err) {
+      console.error('[PWA] Install prompt failed:', err);
+    }
+  };
+
   // --- VIRTUAL ON-SCREEN KEYBOARD STATES ---
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [targetInput, setTargetInput] = useState<HTMLInputElement | null>(null);
@@ -642,6 +686,21 @@ export default function App() {
               <Keyboard className="w-5 h-5" />
             </button>
 
+            {/* PWA Install Button in Header */}
+            {isInstallable && (
+              <button
+                onClick={handleInstallClick}
+                type="button"
+                className="p-3 rounded-2xl bg-indigo-600 border border-indigo-600 text-white shadow-sm cursor-pointer hover:scale-105 active:scale-95 z-[110] flex items-center justify-center gap-1.5 hover:bg-indigo-700 transition duration-200"
+                title={lang === 'ar' ? 'تثبيت كبرنامج للكمبيوتر' : 'Install Desktop App'}
+              >
+                <Download className="w-5 h-5 animate-bounce" />
+                <span className="hidden md:inline text-xs font-black">
+                  {lang === 'ar' ? 'تنزيل البرنامج' : 'Download App'}
+                </span>
+              </button>
+            )}
+
             {/* Hamburger Menu (3 lines) Button */}
             <button
               onClick={() => setShowSidebar(!showSidebar)}
@@ -1134,6 +1193,52 @@ export default function App() {
                         </span>
                       </button>
 
+                    </div>
+                  </div>
+
+                  {/* 2.5. PWA Installation Card */}
+                  <div className={`p-5 rounded-2xl border ${
+                    theme === 'dark'
+                      ? 'bg-zinc-950/50 border-zinc-800/80'
+                      : theme === 'eye-care'
+                      ? 'bg-[#fcf8f2] border-[#e3d3b4]'
+                      : 'bg-slate-50 border-slate-200/80'
+                  }`}>
+                    <h3 className="text-xs font-black uppercase tracking-wider mb-3 text-slate-400 dark:text-zinc-500">
+                      {lang === 'ar' ? 'تثبيت البرنامج' : 'App Installation'}
+                    </h3>
+                    <div className="space-y-3">
+                      <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed font-medium">
+                        {lang === 'ar' 
+                          ? 'تثبيت هذا النظام كبرنامج مستقل على جهازك يتيح لك تشغيله مباشرة وسريعاً دون الحاجة لمتصفح.' 
+                          : 'Install this system as a standalone application on your device for fast access directly without a browser.'}
+                      </p>
+                      <button
+                        onClick={() => {
+                          if (isInstallable) {
+                            handleInstallClick();
+                            setShowSidebar(false);
+                          }
+                        }}
+                        disabled={!isInstallable}
+                        type="button"
+                        className={`w-full text-xs font-black px-4 py-3.5 rounded-xl flex items-center justify-center gap-2 transition duration-200 shadow-sm ${
+                          isInstallable
+                            ? 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer hover:scale-[1.01] active:scale-95'
+                            : theme === 'dark'
+                            ? 'bg-zinc-800/50 border border-zinc-800/80 text-zinc-500 cursor-not-allowed'
+                            : theme === 'eye-care'
+                            ? 'bg-[#eedcb8]/50 border border-[#e3d3b4] text-[#8e7a63] cursor-not-allowed'
+                            : 'bg-slate-100/70 border border-slate-200/50 text-slate-400 cursor-not-allowed'
+                        }`}
+                      >
+                        <Download className={`w-4 h-4 ${isInstallable ? 'animate-bounce' : ''}`} />
+                        <span>
+                          {isInstallable 
+                            ? (lang === 'ar' ? 'تثبيت كبرنامج للكمبيوتر' : 'Install Desktop App')
+                            : (lang === 'ar' ? 'منصب بالفعل أو غير مدعوم' : 'Already Installed or Unsupported')}
+                        </span>
+                      </button>
                     </div>
                   </div>
 
