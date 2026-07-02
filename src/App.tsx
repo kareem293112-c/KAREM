@@ -913,6 +913,7 @@ export default function App() {
         <div className={activeTab === 'history' ? 'block' : 'hidden'}>
           <TransactionHistory
             transactions={transactions}
+            products={products}
             onDeleteTransaction={handleDeleteTransaction}
             onPrintTransaction={triggerPrint}
             onEditTransaction={handleEditTransaction}
@@ -1323,7 +1324,7 @@ export default function App() {
                     <p className={`text-[10px] font-black tracking-widest uppercase mb-1.5 ${
                       theme === 'dark' ? 'text-indigo-400' : theme === 'eye-care' ? 'text-[#845e35]' : 'text-indigo-600'
                     }`}>
-                      ✨ {lang === 'ar' ? 'الإشراف والتطوير' : 'Supervision & Development'} ✨
+                      {lang === 'ar' ? 'الإشراف والتطوير' : 'Supervision & Development'}
                     </p>
                     <h3 className="text-sm font-extrabold mb-1">
                       {lang === 'ar' ? 'محمد شيباني' : 'Mohamed Shibani'}

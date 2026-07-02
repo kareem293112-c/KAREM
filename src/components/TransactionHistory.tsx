@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction, TransactionItem } from '../types';
+import { Transaction, TransactionItem, Product } from '../types';
 import { Calendar, User, Search, Trash2, ChevronDown, ChevronUp, FileText, CheckCircle, TrendingUp, DollarSign, PackageOpen, Undo2, Printer, Edit2, X } from 'lucide-react';
 import { translations } from '../translations';
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
+  products: Product[];
   onDeleteTransaction: (id: string) => void;
   onPrintTransaction: (tx: Transaction, received: number) => void;
   onEditTransaction?: (originalTx: Transaction, updatedTx: Transaction) => void;
@@ -12,7 +13,7 @@ interface TransactionHistoryProps {
   theme: 'light' | 'dark' | 'eye-care';
 }
 
-export default function TransactionHistory({ transactions, onDeleteTransaction, onPrintTransaction, onEditTransaction, lang, theme }: TransactionHistoryProps) {
+export default function TransactionHistory({ transactions, products, onDeleteTransaction, onPrintTransaction, onEditTransaction, lang, theme }: TransactionHistoryProps) {
   const t = translations[lang];
 
   const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
@@ -22,13 +23,26 @@ export default function TransactionHistory({ transactions, onDeleteTransaction, 
   const [editCustomerName, setEditCustomerName] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editItems, setEditItems] = useState<TransactionItem[]>([]);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
 
   const handleStartEdit = (tx: Transaction) => {
     setEditingTx(tx);
     setEditCustomerName(tx.customerName);
     setEditNotes(tx.notes || '');
     setEditItems(tx.items.map(item => ({ ...item })));
+    setProductSearchQuery('');
+    setIsProductDropdownOpen(false);
   };
+
+  const matchedProducts = useMemo(() => {
+    if (!productSearchQuery.trim()) return [];
+    const query = productSearchQuery.toLowerCase();
+    return products.filter((p) => 
+      p.name.toLowerCase().includes(query) ||
+      (p.category && p.category.toLowerCase().includes(query))
+    );
+  }, [products, productSearchQuery]);
 
   // Expanded transactions map to display detailed rows
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
@@ -571,6 +585,115 @@ export default function TransactionHistory({ transactions, onDeleteTransaction, 
                     className={`w-full text-xs rounded-xl px-4 py-2.5 focus:outline-none transition ${inputClass}`}
                   />
                 </div>
+              </div>
+
+              {/* Add Product Search Input */}
+              <div className="relative z-[40] mt-1">
+                <label className={`block text-xs font-bold mb-1.5 ${textSecondaryClass}`}>
+                  {lang === 'ar' ? '🔍 إضافة منتج جديد للفاتورة:' : '🔍 Add new product to invoice:'}
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder={lang === 'ar' ? 'اكتب اسم المنتج أو التصنيف للبحث والإضافة الفورية...' : 'Type product name or category to search & add instantly...'}
+                    value={productSearchQuery}
+                    onChange={(e) => {
+                      setProductSearchQuery(e.target.value);
+                      setIsProductDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsProductDropdownOpen(true)}
+                    className={`w-full text-xs rounded-xl px-4 py-2.5 focus:outline-none transition ${inputClass}`}
+                  />
+                  {productSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProductSearchQuery('');
+                        setIsProductDropdownOpen(false);
+                      }}
+                      className="absolute right-3 top-2.5 text-slate-400 hover:text-rose-500 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown list for search results */}
+                {isProductDropdownOpen && matchedProducts.length > 0 && (
+                  <div className={`absolute left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-xl border shadow-lg z-50 divide-y ${
+                    theme === 'dark' 
+                      ? 'bg-zinc-900 border-zinc-850 divide-zinc-800' 
+                      : theme === 'eye-care' 
+                      ? 'bg-[#faf2e4] border-[#dfca9e] divide-[#dfca9e]' 
+                      : 'bg-white border-slate-200 divide-slate-100'
+                  }`}>
+                    {matchedProducts.map((p) => {
+                      const exists = editItems.some((item) => item.productId === p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            if (exists) {
+                              setEditItems(editItems.map(item => {
+                                if (item.productId === p.id) {
+                                  return { ...item, quantity: item.quantity + 1 };
+                                }
+                                return item;
+                              }));
+                            } else {
+                              setEditItems([
+                                ...editItems,
+                                {
+                                  productId: p.id,
+                                  productName: p.name,
+                                  quantity: 1,
+                                  costPrice: p.costPrice,
+                                  sellingPrice: p.sellingPrice,
+                                }
+                              ]);
+                            }
+                            setProductSearchQuery('');
+                            setIsProductDropdownOpen(false);
+                          }}
+                          className={`w-full text-right px-4 py-3 text-xs transition flex items-center justify-between cursor-pointer ${
+                            theme === 'dark' 
+                              ? 'hover:bg-zinc-800/80 text-zinc-200' 
+                              : theme === 'eye-care' 
+                              ? 'hover:bg-[#ebdcc3] text-[#433422]' 
+                              : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                          dir={lang === 'ar' ? 'rtl' : 'ltr'}
+                        >
+                          <div className="flex flex-col items-start">
+                            <span className="font-bold text-sm">{p.name}</span>
+                            {p.category && (
+                              <span className="text-[9px] text-indigo-500 opacity-80">{p.category}</span>
+                            )}
+                          </div>
+                          <div className="text-left font-medium">
+                            <div className="text-[11px] text-emerald-500 font-bold">{p.sellingPrice.toLocaleString()} {t.currency}</div>
+                            <div className={`text-[9px] ${textSecondaryClass}`}>
+                              {lang === 'ar' ? `المخزون الحالي: ${p.quantityInStock}` : `Current Stock: ${p.quantityInStock}`}
+                              {exists && <span className="text-indigo-500 font-bold ml-1 mr-1">({lang === 'ar' ? 'مضاف بالفعل' : 'Already in invoice'})</span>}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {isProductDropdownOpen && productSearchQuery.trim() && matchedProducts.length === 0 && (
+                  <div className={`absolute left-0 right-0 mt-1 p-4 text-xs text-center rounded-xl border shadow-lg z-50 ${
+                    theme === 'dark' 
+                      ? 'bg-zinc-900 border-zinc-850 text-zinc-400' 
+                      : theme === 'eye-care' 
+                      ? 'bg-[#faf2e4] border-[#dfca9e] text-[#786144]' 
+                      : 'bg-white border-slate-200 text-slate-500'
+                  }`}>
+                    {lang === 'ar' ? 'لم يتم العثور على منتجات مطابقة للبحث 😕' : 'No matching products found 😕'}
+                  </div>
+                )}
               </div>
 
               {/* Items List Header */}
