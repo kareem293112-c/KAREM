@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { Product, Transaction, CartItem } from './types';
+import { Product, Transaction, CartItem, Expense } from './types';
 import Dashboard from './components/Dashboard';
 import POS from './components/POS';
 import Inventory from './components/Inventory';
 import TransactionHistory from './components/TransactionHistory';
-import { LayoutDashboard, ShoppingCart, Package, History, Calculator, HelpCircle, Layers, Globe, Sun, Moon, Eye, Wifi, WifiOff, Download, RefreshCw, AlertTriangle, Menu, X, Info } from 'lucide-react';
+import Expenses from './components/Expenses';
+import VirtualKeyboard from './components/VirtualKeyboard';
+import { LayoutDashboard, ShoppingCart, Package, History, Calculator, HelpCircle, Layers, Globe, Sun, Moon, Eye, Wifi, WifiOff, Download, RefreshCw, AlertTriangle, Menu, X, Info, TrendingDown, Keyboard } from 'lucide-react';
 import { translations } from './translations';
 import { pwaDb } from './db/pwaDb';
 import { motion, AnimatePresence } from 'motion/react';
@@ -15,9 +17,45 @@ export default function App() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'pos' | 'inventory' | 'history'>('dashboard');
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'pos' | 'inventory' | 'history' | 'expenses'>('dashboard');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // --- VIRTUAL ON-SCREEN KEYBOARD STATES ---
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [targetInput, setTargetInput] = useState<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    // 1. Triple click: toggle/open the keyboard for a specific input field
+    const handleTripleClick = (e: MouseEvent) => {
+      if (e.detail === 3) {
+        const target = e.target as HTMLElement;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+          setTargetInput(target as HTMLInputElement);
+          setIsKeyboardOpen(true);
+          setTimeout(() => target.focus(), 50);
+        }
+      }
+    };
+
+    // 2. Global focus tracking: automatically track the active input/textarea
+    // so the keyboard works seamlessly on whatever input is focused next
+    const handleFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        setTargetInput(target as HTMLInputElement);
+      }
+    };
+
+    window.addEventListener('click', handleTripleClick);
+    window.addEventListener('focusin', handleFocusIn);
+    
+    return () => {
+      window.removeEventListener('click', handleTripleClick);
+      window.removeEventListener('focusin', handleFocusIn);
+    };
+  }, []);
 
   // Print-specific active transaction states
   const [printActiveTransaction, setPrintActiveTransaction] = useState<Transaction | null>(null);
@@ -143,6 +181,7 @@ export default function App() {
       try {
         let dbProducts = await pwaDb.getProducts();
         let dbTransactions = await pwaDb.getTransactions();
+        let dbExpenses = await pwaDb.getExpenses();
 
         // Safe migration from LocalStorage to IndexedDB if first load
         if (dbProducts.length === 0) {
@@ -171,6 +210,19 @@ export default function App() {
           }
         }
 
+        if (dbExpenses.length === 0) {
+          const savedExpenses = localStorage.getItem('accounting_expenses');
+          if (savedExpenses) {
+            try {
+              const parsed = JSON.parse(savedExpenses);
+              if (parsed && parsed.length > 0) {
+                dbExpenses = parsed;
+                await pwaDb.saveExpensesBatch(parsed);
+              }
+            } catch (e) {}
+          }
+        }
+
         // Force clear if any old demo products are present
         const hasDemoData = dbProducts.some(
           (p) => p.id === 'prod-1' || p.id === 'prod-2' || p.id === 'prod-3' || p.id === 'prod-4' || p.id === 'prod-5' || p.id === 'prod-6'
@@ -178,22 +230,29 @@ export default function App() {
         if (hasDemoData) {
           dbProducts = [];
           dbTransactions = [];
+          dbExpenses = [];
           await pwaDb.clearAll();
           localStorage.setItem('accounting_products', JSON.stringify([]));
           localStorage.setItem('accounting_transactions', JSON.stringify([]));
+          localStorage.setItem('accounting_expenses', JSON.stringify([]));
         }
 
         setProducts(dbProducts);
         setTransactions(dbTransactions);
+        setExpenses(dbExpenses);
       } catch (error) {
         console.error("Failed to load data from IndexedDB, falling back to LocalStorage:", error);
         const savedProducts = localStorage.getItem('accounting_products');
         const savedTransactions = localStorage.getItem('accounting_transactions');
+        const savedExpenses = localStorage.getItem('accounting_expenses');
         if (savedProducts) {
           try { setProducts(JSON.parse(savedProducts)); } catch(e){}
         }
         if (savedTransactions) {
           try { setTransactions(JSON.parse(savedTransactions)); } catch(e){}
+        }
+        if (savedExpenses) {
+          try { setExpenses(JSON.parse(savedExpenses)); } catch(e){}
         }
       }
     };
@@ -286,8 +345,25 @@ export default function App() {
       };
     });
 
+    // Calculate Daily Sequential Order Number (resets to 1 each day)
+    const getLocalDateString = (isoString: string) => {
+      const d = new Date(isoString);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const todayStr = getLocalDateString(new Date().toISOString());
+    const todayTransactions = transactions.filter((tx) => getLocalDateString(tx.date) === todayStr);
+    const maxOrderNumber = todayTransactions.reduce((max, tx) => {
+      return (tx.orderNumber && tx.orderNumber > max) ? tx.orderNumber : max;
+    }, 0);
+    const orderNumber = maxOrderNumber + 1;
+
     const newTx: Transaction = {
       id: `tx-${Date.now()}`,
+      orderNumber: orderNumber,
       customerName: customerName,
       items: itemsForTx,
       totalAmount: totalAmount,
@@ -337,6 +413,78 @@ export default function App() {
     saveTransactions(updatedTransactions);
   };
 
+  // Edit Transaction and adjust stock quantities automatically
+  const handleEditTransaction = (originalTx: Transaction, updatedTx: Transaction) => {
+    // 1. Replenish the quantities of original transaction
+    let tempProducts = [...products];
+    originalTx.items.forEach((item) => {
+      tempProducts = tempProducts.map((p) => {
+        if (p.id === item.productId) {
+          return {
+            ...p,
+            quantityInStock: p.quantityInStock + item.quantity,
+          };
+        }
+        return p;
+      });
+    });
+
+    // 2. Subtract the quantities of updated transaction
+    updatedTx.items.forEach((item) => {
+      tempProducts = tempProducts.map((p) => {
+        if (p.id === item.productId) {
+          return {
+            ...p,
+            quantityInStock: Math.max(0, p.quantityInStock - item.quantity),
+          };
+        }
+        return p;
+      });
+    });
+
+    // 3. Update transaction list
+    const updatedTransactions = transactions.map((t) => (t.id === originalTx.id ? updatedTx : t));
+
+    // 4. Save state
+    saveProducts(tempProducts);
+    saveTransactions(updatedTransactions);
+  };
+
+  // --- EXPENSES PERSISTENCE ---
+  const saveExpenses = async (updatedExpenses: Expense[], skipDb = false) => {
+    setExpenses(updatedExpenses);
+    localStorage.setItem('accounting_expenses', JSON.stringify(updatedExpenses));
+    if (!skipDb) {
+      try {
+        await pwaDb.saveExpensesBatch(updatedExpenses);
+        if (!isOnline && updatedExpenses.length > 0) {
+          await pwaDb.addToSyncQueue({
+            id: `sync-exp-${Date.now()}`,
+            type: 'expense_update',
+            payload: updatedExpenses
+          });
+        }
+      } catch (err) {
+        console.error("Failed to save expenses to IndexedDB:", err);
+      }
+    }
+  };
+
+  const handleAddExpense = (newExp: Expense) => {
+    const updated = [newExp, ...expenses];
+    saveExpenses(updated);
+  };
+
+  const handleEditExpense = (updatedExp: Expense) => {
+    const updated = expenses.map((e) => (e.id === updatedExp.id ? updatedExp : e));
+    saveExpenses(updated);
+  };
+
+  const handleDeleteExpense = (id: string) => {
+    const updated = expenses.filter((e) => e.id !== id);
+    saveExpenses(updated);
+  };
+
   // --- GENERAL ACCOUNTING ESTIMATES (Asset Evaluation) ---
   const stockSummary = useMemo(() => {
     let totalAssetCost = 0;
@@ -364,8 +512,10 @@ export default function App() {
   const clearDatabaseCompletely = async () => {
     setProducts([]);
     setTransactions([]);
+    setExpenses([]);
     localStorage.setItem('accounting_products', JSON.stringify([]));
     localStorage.setItem('accounting_transactions', JSON.stringify([]));
+    localStorage.setItem('accounting_expenses', JSON.stringify([]));
     try {
       await pwaDb.clearAll();
     } catch (e) {
@@ -465,6 +615,32 @@ export default function App() {
                 })}
               </span>
             </span>
+
+            {/* Virtual Keyboard Toggle Button */}
+            <button
+              onClick={() => {
+                setIsKeyboardOpen(!isKeyboardOpen);
+                if (!isKeyboardOpen) {
+                  const active = document.activeElement;
+                  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                    setTargetInput(active as HTMLInputElement);
+                  }
+                }
+              }}
+              type="button"
+              className={`p-3 rounded-2xl border transition duration-200 flex items-center justify-center shadow-sm cursor-pointer hover:scale-105 active:scale-95 z-[110] ${
+                isKeyboardOpen
+                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-indigo-100/30 font-bold'
+                  : theme === 'dark'
+                  ? 'bg-zinc-800 border-zinc-700 text-indigo-400 hover:bg-zinc-700 hover:text-indigo-300'
+                  : theme === 'eye-care'
+                  ? 'bg-[#faf2e4] border-[#e3d3b4] text-[#7a644b] hover:bg-[#ebdcc0] hover:text-[#433422]'
+                  : 'bg-white border-slate-200 text-indigo-600 hover:bg-indigo-50/50'
+              }`}
+              title={lang === 'ar' ? 'لوحة المفاتيح الافتراضية' : 'Virtual Keyboard'}
+            >
+              <Keyboard className="w-5 h-5" />
+            </button>
 
             {/* Hamburger Menu (3 lines) Button */}
             <button
@@ -613,6 +789,28 @@ export default function App() {
               <span>{t.tabHistory}</span>
             </button>
 
+            {/* Tab 5: Expenses */}
+            <button
+              onClick={() => setActiveTab('expenses')}
+              className={`py-4 px-1 border-b-2 font-bold text-sm flex items-center gap-2 transition cursor-pointer ${
+                activeTab === 'expenses'
+                  ? theme === 'dark'
+                    ? 'border-indigo-400 text-indigo-400'
+                    : theme === 'eye-care'
+                    ? 'border-amber-900 text-amber-950'
+                    : 'border-indigo-600 text-indigo-600'
+                  : theme === 'dark'
+                  ? 'border-transparent text-zinc-500 hover:text-zinc-300'
+                  : theme === 'eye-care'
+                  ? 'border-transparent text-[#90795e] hover:text-[#433422]'
+                  : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-300'
+              }`}
+              id="expenses_tab_button"
+            >
+              <TrendingDown className="w-4.5 h-4.5" />
+              <span>{t.tabExpenses}</span>
+            </button>
+
           </nav>
         </div>
       </div>
@@ -622,16 +820,17 @@ export default function App() {
         
 
 
-        {activeTab === 'dashboard' && (
+        <div className={activeTab === 'dashboard' ? 'block' : 'hidden'}>
           <Dashboard
             transactions={transactions}
             products={products}
+            expenses={expenses}
             lang={lang}
             theme={theme}
           />
-        )}
+        </div>
 
-        {activeTab === 'pos' && (
+        <div className={activeTab === 'pos' ? 'block' : 'hidden'}>
           <POS
             products={products}
             onAddTransaction={handleAddTransaction}
@@ -639,9 +838,9 @@ export default function App() {
             lang={lang}
             theme={theme}
           />
-        )}
+        </div>
 
-        {activeTab === 'inventory' && (
+        <div className={activeTab === 'inventory' ? 'block' : 'hidden'}>
           <Inventory
             products={products}
             onAddProduct={handleAddProduct}
@@ -650,17 +849,29 @@ export default function App() {
             lang={lang}
             theme={theme}
           />
-        )}
+        </div>
 
-        {activeTab === 'history' && (
+        <div className={activeTab === 'history' ? 'block' : 'hidden'}>
           <TransactionHistory
             transactions={transactions}
             onDeleteTransaction={handleDeleteTransaction}
             onPrintTransaction={triggerPrint}
+            onEditTransaction={handleEditTransaction}
             lang={lang}
             theme={theme}
           />
-        )}
+        </div>
+
+        <div className={activeTab === 'expenses' ? 'block' : 'hidden'}>
+          <Expenses
+            expenses={expenses}
+            onAddExpense={handleAddExpense}
+            onEditExpense={handleEditExpense}
+            onDeleteExpense={handleDeleteExpense}
+            lang={lang}
+            theme={theme}
+          />
+        </div>
 
       </main>
 
@@ -844,6 +1055,36 @@ export default function App() {
                           </button>
                         </div>
                       </div>
+
+                      {/* Virtual Keyboard Toggle */}
+                      <div className="flex items-center justify-between gap-3 pt-2 border-t border-dashed border-zinc-700/20">
+                        <span className="text-sm font-bold">{lang === 'ar' ? 'لوحة المفاتيح الافتراضية:' : 'On-Screen Keyboard:'}</span>
+                        <button
+                          onClick={() => {
+                            setIsKeyboardOpen(!isKeyboardOpen);
+                            if (!isKeyboardOpen) {
+                              const active = document.activeElement;
+                              if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+                                setTargetInput(active as HTMLInputElement);
+                              }
+                            }
+                          }}
+                          type="button"
+                          className={`text-xs font-bold px-3.5 py-2 rounded-xl border transition flex items-center gap-2 cursor-pointer shadow-sm ${
+                            isKeyboardOpen
+                              ? 'bg-indigo-600 border-indigo-600 text-white'
+                              : theme === 'dark'
+                              ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
+                              : theme === 'eye-care'
+                              ? 'bg-[#fcf8f2] border-[#e3d3b4] text-[#433422] hover:bg-[#faf2e4]'
+                              : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          <Keyboard className="w-4 h-4 text-indigo-500" />
+                          <span>{isKeyboardOpen ? (lang === 'ar' ? 'نشطة' : 'Active') : (lang === 'ar' ? 'غير نشطة' : 'Inactive')}</span>
+                        </button>
+                      </div>
+
                     </div>
                   </div>
 
@@ -1064,6 +1305,15 @@ export default function App() {
         </div>
       )}
 
+      {/* Reusable, smart virtual on-screen keyboard */}
+      <VirtualKeyboard
+        lang={lang}
+        theme={theme}
+        isOpen={isKeyboardOpen}
+        onClose={() => setIsKeyboardOpen(false)}
+        targetInput={targetInput}
+      />
+
     </div>
 
     {/* Elegant Printable Thermal/A4 Receipt Slip */}
@@ -1080,6 +1330,16 @@ export default function App() {
           <p className="text-[10px] text-zinc-700 font-bold">
             {lang === 'ar' ? 'سند مبيعات مبسط' : 'Simplified Sales Receipt'}
           </p>
+
+          <div className="border border-dashed border-black rounded p-1.5 my-1.5 text-center">
+            <span className="text-[9px] font-bold block">
+              {lang === 'ar' ? 'رقم الطلب اليومي' : 'Daily Order Number'}
+            </span>
+            <span className="text-xl font-black block">
+              #{printActiveTransaction.orderNumber}
+            </span>
+          </div>
+
           <div className="border-b border-dashed border-black my-2"></div>
         </div>
 

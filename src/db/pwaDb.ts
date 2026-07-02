@@ -1,11 +1,11 @@
-import { Product, Transaction } from '../types';
+import { Product, Transaction, Expense, HeldOrder } from '../types';
 
 const DB_NAME = 'AccountingPwaDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface OfflineSyncQueueItem {
   id: string;
-  type: 'transaction_add' | 'transaction_delete' | 'product_update';
+  type: 'transaction_add' | 'transaction_delete' | 'product_update' | 'expense_update';
   payload: any;
   timestamp: string;
 }
@@ -53,6 +53,16 @@ export class PwaDatabase {
         // Sync Queue Store (for offline background synchronization)
         if (!db.objectStoreNames.contains('sync_queue')) {
           db.createObjectStore('sync_queue', { keyPath: 'id' });
+        }
+
+        // Expenses Store
+        if (!db.objectStoreNames.contains('expenses')) {
+          db.createObjectStore('expenses', { keyPath: 'id' });
+        }
+
+        // Held Orders Store
+        if (!db.objectStoreNames.contains('held_orders')) {
+          db.createObjectStore('held_orders', { keyPath: 'id' });
         }
       };
     });
@@ -216,19 +226,114 @@ export class PwaDatabase {
     });
   }
 
+  // --- EXPENSES STORE ---
+
+  public async getExpenses(): Promise<Expense[]> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('expenses', 'readonly');
+      const store = transaction.objectStore('expenses');
+      const request = store.getAll();
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  public async saveExpense(expense: Expense): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('expenses', 'readwrite');
+      const store = transaction.objectStore('expenses');
+      const request = store.put(expense);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  public async saveExpensesBatch(expenses: Expense[]): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('expenses', 'readwrite');
+      const store = transaction.objectStore('expenses');
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+
+      expenses.forEach((exp) => {
+        store.put(exp);
+      });
+    });
+  }
+
+  public async deleteExpense(id: string): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('expenses', 'readwrite');
+      const store = transaction.objectStore('expenses');
+      const request = store.delete(id);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // --- HELD ORDERS STORE ---
+
+  public async getHeldOrders(): Promise<HeldOrder[]> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('held_orders', 'readonly');
+      const store = transaction.objectStore('held_orders');
+      const request = store.getAll();
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  public async saveHeldOrder(heldOrder: HeldOrder): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('held_orders', 'readwrite');
+      const store = transaction.objectStore('held_orders');
+      const request = store.put(heldOrder);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  public async deleteHeldOrder(id: string): Promise<void> {
+    const db = await this.getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction('held_orders', 'readwrite');
+      const store = transaction.objectStore('held_orders');
+      const request = store.delete(id);
+
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
+
   // --- GENERAL MANAGEMENT ---
 
   public async clearAll(): Promise<void> {
     const db = await this.getDB();
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(['products', 'transactions', 'sync_queue'], 'readwrite');
+      const transaction = db.transaction(['products', 'transactions', 'sync_queue', 'expenses', 'held_orders'], 'readwrite');
       const productsStore = transaction.objectStore('products');
       const transactionsStore = transaction.objectStore('transactions');
       const syncStore = transaction.objectStore('sync_queue');
+      const expensesStore = transaction.objectStore('expenses');
+      const heldStore = transaction.objectStore('held_orders');
 
       productsStore.clear();
       transactionsStore.clear();
       syncStore.clear();
+      expensesStore.clear();
+      heldStore.clear();
 
       transaction.oncomplete = () => resolve();
       transaction.onerror = () => reject(transaction.error);

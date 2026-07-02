@@ -24,6 +24,7 @@ export interface TransactionItem {
 
 export interface Transaction {
   id: string;
+  orderNumber: number; // الرقم التسلسلي اليومي للطلب
   customerName: string; // اسم الزبون
   items: TransactionItem[];
   totalAmount: number; // إجمالي قيمة البيع
@@ -39,4 +40,20 @@ export interface DailyReport {
   cost: number;
   profit: number;
   count: number;
+}
+
+export interface Expense {
+  id: string;
+  name: string; // اسم المادة المشتراة مثل طحين، زعتر، كرتون فواتير
+  amount: number; // التكلفة الكلية المدفوعة
+  date: string; // التاريخ والوقت
+  notes?: string;
+}
+
+export interface HeldOrder {
+  id: string;
+  customerName: string;
+  cart: CartItem[];
+  notes?: string;
+  heldAt: string;
 }

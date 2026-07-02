@@ -1,20 +1,34 @@
 import React, { useState, useMemo } from 'react';
-import { Transaction } from '../types';
-import { Calendar, User, Search, Trash2, ChevronDown, ChevronUp, FileText, CheckCircle, TrendingUp, DollarSign, PackageOpen, Undo2, Printer } from 'lucide-react';
+import { Transaction, TransactionItem } from '../types';
+import { Calendar, User, Search, Trash2, ChevronDown, ChevronUp, FileText, CheckCircle, TrendingUp, DollarSign, PackageOpen, Undo2, Printer, Edit2, X } from 'lucide-react';
 import { translations } from '../translations';
 
 interface TransactionHistoryProps {
   transactions: Transaction[];
   onDeleteTransaction: (id: string) => void;
   onPrintTransaction: (tx: Transaction, received: number) => void;
+  onEditTransaction?: (originalTx: Transaction, updatedTx: Transaction) => void;
   lang: 'ar' | 'en';
   theme: 'light' | 'dark' | 'eye-care';
 }
 
-export default function TransactionHistory({ transactions, onDeleteTransaction, onPrintTransaction, lang, theme }: TransactionHistoryProps) {
+export default function TransactionHistory({ transactions, onDeleteTransaction, onPrintTransaction, onEditTransaction, lang, theme }: TransactionHistoryProps) {
   const t = translations[lang];
 
   const [transactionToDelete, setTransactionToDelete] = useState<string | null>(null);
+
+  // States for Editing Transaction
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editItems, setEditItems] = useState<TransactionItem[]>([]);
+
+  const handleStartEdit = (tx: Transaction) => {
+    setEditingTx(tx);
+    setEditCustomerName(tx.customerName);
+    setEditNotes(tx.notes || '');
+    setEditItems(tx.items.map(item => ({ ...item })));
+  };
 
   // Expanded transactions map to display detailed rows
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
@@ -324,7 +338,12 @@ export default function TransactionHistory({ transactions, onDeleteTransaction, 
                         <FileText className="w-5 h-5" />
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {tx.orderNumber && (
+                            <span className="bg-amber-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full select-none">
+                              {lang === 'ar' ? `طلب #${tx.orderNumber}` : `Order #${tx.orderNumber}`}
+                            </span>
+                          )}
                           <h4 className={`font-bold text-sm sm:text-base ${textPrimaryClass}`}>{tx.customerName}</h4>
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                             theme === 'dark' ? 'bg-zinc-850 text-zinc-400' : theme === 'eye-care' ? 'bg-[#ebdcc3] text-[#433422]' : 'bg-slate-100 text-slate-500'
@@ -371,6 +390,15 @@ export default function TransactionHistory({ transactions, onDeleteTransaction, 
                           {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                         </button>
                         
+                        <button
+                          onClick={() => handleStartEdit(tx)}
+                          type="button"
+                          className="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 p-2 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-950/20 transition cursor-pointer"
+                          title={lang === 'ar' ? 'تعديل الفاتورة وتصحيح الحساب' : 'Edit Invoice'}
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+
                         <button
                           onClick={() => setTransactionToDelete(tx.id)}
                           type="button"
@@ -487,6 +515,246 @@ export default function TransactionHistory({ transactions, onDeleteTransaction, 
                 {lang === 'ar' ? 'إلغاء التراجع' : 'Cancel'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Edit Transaction Modal */}
+      {editingTx && (
+        <div className="fixed inset-0 bg-slate-900/60 dark:bg-zinc-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className={`rounded-2xl max-w-2xl w-full p-6 shadow-2xl border animate-scale-up ${cardBgClass} flex flex-col max-h-[90vh] ${
+            lang === 'ar' ? 'text-right' : 'text-left'
+          }`} dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+            
+            <div className="flex justify-between items-center border-b pb-4 mb-4 border-dashed border-zinc-700/30">
+              <div>
+                <h3 className={`text-lg font-bold ${textPrimaryClass}`}>
+                  {lang === 'ar' ? '📝 تعديل بيانات الفاتورة وتصحيح الأخطاء' : '📝 Edit Invoice & Correct Errors'}
+                </h3>
+                <p className={`text-xs mt-1 ${textSecondaryClass}`}>
+                  {lang === 'ar' ? `رقم الطلب اليومي: #${editingTx.orderNumber}` : `Daily Order: #${editingTx.orderNumber}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingTx(null)}
+                className="text-slate-400 hover:text-rose-500 transition p-1.5 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="space-y-4 overflow-y-auto flex-1 pr-1.5 pl-1.5">
+              
+              {/* Customer and Notes Row */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className={`block text-xs font-bold mb-1.5 ${textSecondaryClass}`}>
+                    {lang === 'ar' ? 'اسم الزبون:' : 'Customer Name:'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editCustomerName}
+                    onChange={(e) => setEditCustomerName(e.target.value)}
+                    className={`w-full text-xs rounded-xl px-4 py-2.5 focus:outline-none transition ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className={`block text-xs font-bold mb-1.5 ${textSecondaryClass}`}>
+                    {lang === 'ar' ? 'ملاحظات إضافية:' : 'Additional Notes:'}
+                  </label>
+                  <input
+                    type="text"
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    className={`w-full text-xs rounded-xl px-4 py-2.5 focus:outline-none transition ${inputClass}`}
+                  />
+                </div>
+              </div>
+
+              {/* Items List Header */}
+              <h4 className={`text-xs font-bold border-b pb-1.5 mt-2 flex items-center gap-1.5 ${textSecondaryClass}`}>
+                <PackageOpen className="w-4 h-4 text-indigo-500" />
+                {lang === 'ar' ? 'المنتجات والكميات المسجلة بالفاتورة:' : 'Registered items in this invoice:'}
+              </h4>
+
+              {/* Items Table / Row */}
+              <div className="space-y-2.5">
+                {editItems.length === 0 ? (
+                  <div className={`text-center py-6 text-xs ${textSecondaryClass}`}>
+                    {lang === 'ar' ? 'لا توجد سلع بالفاتورة. يرجى إلغاء التعديل أو حذف الفاتورة بالكامل.' : 'No items in the invoice. Please cancel or delete the invoice instead.'}
+                  </div>
+                ) : (
+                  editItems.map((item, index) => {
+                    const itemCostTotal = item.costPrice * item.quantity;
+                    const itemSaleTotal = item.sellingPrice * item.quantity;
+                    const itemProfit = itemSaleTotal - itemCostTotal;
+
+                    return (
+                      <div 
+                        key={index} 
+                        className={`p-3.5 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                          theme === 'dark' ? 'bg-zinc-950/40 border-zinc-850' : theme === 'eye-care' ? 'bg-[#faf5ea] border-[#dfca9e]' : 'bg-slate-50/50 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex-1">
+                          <span className={`font-bold text-sm block ${textPrimaryClass}`}>{item.productName}</span>
+                          <span className={`text-[10px] ${textSecondaryClass}`}>
+                            {lang === 'ar' ? 'تكلفة الحبة:' : 'Cost per unit:'} {item.costPrice.toLocaleString()} {t.currency}
+                          </span>
+                        </div>
+
+                        {/* Adjust qty and sellingPrice fields */}
+                        <div className="flex flex-wrap items-center gap-4">
+                          {/* Qty field */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-slate-400">{lang === 'ar' ? 'الكمية:' : 'Qty:'}</span>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const val = Math.max(1, parseInt(e.target.value) || 1);
+                                const updated = [...editItems];
+                                updated[index].quantity = val;
+                                setEditItems(updated);
+                              }}
+                              className={`w-14 text-center text-xs font-bold rounded-lg py-1.5 px-1 focus:outline-none border ${
+                                theme === 'dark' ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white border-slate-200 text-slate-800'
+                              }`}
+                            />
+                          </div>
+
+                          {/* Price field */}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] text-slate-400">{lang === 'ar' ? 'السعر:' : 'Price:'}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={item.sellingPrice}
+                              onChange={(e) => {
+                                const val = Math.max(0, parseFloat(e.target.value) || 0);
+                                const updated = [...editItems];
+                                updated[index].sellingPrice = val;
+                                setEditItems(updated);
+                              }}
+                              className={`w-20 text-center text-xs font-bold rounded-lg py-1.5 px-1 focus:outline-none border ${
+                                theme === 'dark' ? 'bg-zinc-800 text-white border-zinc-700' : 'bg-white border-slate-200 text-slate-800'
+                              }`}
+                            />
+                            <span className={`text-[10px] ${textSecondaryClass}`}>{t.currency}</span>
+                          </div>
+
+                          {/* Line Profit Info */}
+                          <div className="text-right min-w-[70px]">
+                            <span className={`text-xs font-extrabold block ${itemProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                              {itemProfit >= 0 ? '+' : ''}{itemProfit.toLocaleString()}
+                            </span>
+                            <span className="text-[9px] text-slate-400 block">{lang === 'ar' ? 'صافي الربح' : 'Net Profit'}</span>
+                          </div>
+
+                          {/* Remove Item Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = editItems.filter((_, i) => i !== index);
+                              setEditItems(updated);
+                            }}
+                            className="text-slate-400 hover:text-rose-600 p-1 rounded-lg transition"
+                            title={lang === 'ar' ? 'إزالة السلعة' : 'Remove Item'}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Dynamic Math Summary */}
+              {editItems.length > 0 && (
+                (() => {
+                  let totalAmount = 0;
+                  let totalCost = 0;
+                  editItems.forEach(i => {
+                    totalAmount += i.sellingPrice * i.quantity;
+                    totalCost += i.costPrice * i.quantity;
+                  });
+                  const totalProfit = totalAmount - totalCost;
+                  const margin = totalAmount > 0 ? (totalProfit / totalAmount) * 100 : 0;
+
+                  return (
+                    <div className={`p-4 rounded-xl border grid grid-cols-3 gap-4 text-center mt-3 ${
+                      theme === 'dark' ? 'bg-zinc-950 border-zinc-850' : theme === 'eye-care' ? 'bg-[#ebdcc3] border-[#dfca9e]' : 'bg-slate-100 border-slate-200'
+                    }`}>
+                      <div>
+                        <span className={`text-[10px] block font-bold ${textSecondaryClass}`}>{lang === 'ar' ? 'إجمالي المبيعات الجديد' : 'New Sales Total'}</span>
+                        <span className={`text-sm font-extrabold ${textPrimaryClass}`}>{totalAmount.toLocaleString()} {t.currency}</span>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] block font-bold ${textSecondaryClass}`}>{lang === 'ar' ? 'إجمالي التكلفة الجديد' : 'New Cost Total'}</span>
+                        <span className={`text-sm font-bold ${textPrimaryClass}`}>{totalCost.toLocaleString()} {t.currency}</span>
+                      </div>
+                      <div>
+                        <span className={`text-[10px] block font-bold ${textSecondaryClass}`}>{lang === 'ar' ? 'صافي الربح المعدل' : 'Adjusted Profit'}</span>
+                        <span className={`text-sm font-extrabold block ${totalProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {totalProfit >= 0 ? '+' : ''}{totalProfit.toLocaleString()} {t.currency}
+                          <span className="text-[9px] font-bold block opacity-75">({margin.toFixed(0)}% هامش)</span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+
+            </div>
+
+            <div className="flex gap-3 mt-5 pt-3 border-t border-dashed border-zinc-700/30 justify-end">
+              <button
+                type="button"
+                onClick={() => setEditingTx(null)}
+                className={`px-5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
+                  theme === 'dark' ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-750' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {lang === 'ar' ? 'إلغاء التعديل' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                disabled={editItems.length === 0}
+                onClick={() => {
+                  if (editItems.length === 0) return;
+                  let totalAmount = 0;
+                  let totalCost = 0;
+                  editItems.forEach(i => {
+                    totalAmount += i.sellingPrice * i.quantity;
+                    totalCost += i.costPrice * i.quantity;
+                  });
+
+                  const updatedTx: Transaction = {
+                    ...editingTx,
+                    customerName: editCustomerName.trim() || (lang === 'ar' ? 'زبون عام' : 'General Customer'),
+                    notes: editNotes.trim() || undefined,
+                    items: editItems,
+                    totalAmount,
+                    totalCost,
+                    totalProfit: totalAmount - totalCost,
+                  };
+
+                  onEditTransaction?.(editingTx, updatedTx);
+                  setEditingTx(null);
+                }}
+                className={`px-6 py-2.5 rounded-xl font-bold text-xs text-white transition flex items-center gap-1.5 cursor-pointer ${
+                  editItems.length === 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {lang === 'ar' ? 'حفظ التعديلات والتصحيح' : 'Save Changes & Recalculate'}
+              </button>
+            </div>
+
           </div>
         </div>
       )}

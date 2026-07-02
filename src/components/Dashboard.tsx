@@ -1,41 +1,45 @@
 import React, { useMemo } from 'react';
-import { Product, Transaction } from '../types';
-import { DollarSign, TrendingUp, Package, ShoppingCart, Percent, Award } from 'lucide-react';
+import { Product, Transaction, Expense } from '../types';
+import { DollarSign, TrendingUp, TrendingDown, Package, ShoppingCart, Percent, Award } from 'lucide-react';
 import { translations } from '../translations';
 
 interface DashboardProps {
   transactions: Transaction[];
   products: Product[];
+  expenses: Expense[];
   lang: 'ar' | 'en';
   theme: 'light' | 'dark' | 'eye-care';
 }
 
-export default function Dashboard({ transactions, products, lang, theme }: DashboardProps) {
+export default function Dashboard({ transactions, products, expenses, lang, theme }: DashboardProps) {
   const t = translations[lang];
 
-  // 1. Calculate General Statistics
+  // 1. Calculate General Statistics including expenses
   const stats = useMemo(() => {
     let totalSales = 0;
     let totalCost = 0;
-    let totalProfit = 0;
+    let totalProfitBeforeExpenses = 0;
     let salesCount = transactions.length;
 
     transactions.forEach((tx) => {
       totalSales += tx.totalAmount;
       totalCost += tx.totalCost;
-      totalProfit += tx.totalProfit;
+      totalProfitBeforeExpenses += tx.totalProfit;
     });
 
+    const totalExpenses = expenses ? expenses.reduce((acc, exp) => acc + exp.amount, 0) : 0;
+    const totalProfit = totalProfitBeforeExpenses - totalExpenses;
     const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0;
 
     return {
       totalSales,
       totalCost,
+      totalExpenses,
       totalProfit,
       salesCount,
       profitMargin,
     };
-  }, [transactions]);
+  }, [transactions, expenses]);
 
   // 2. Calculate Top Products (by units sold and by profit generated)
   const topProducts = useMemo(() => {
@@ -97,8 +101,19 @@ export default function Dashboard({ transactions, products, lang, theme }: Dashb
       }
     });
 
+    // Deduct daily operational expenses from daily profits
+    if (expenses) {
+      expenses.forEach((exp) => {
+        const expDateStr = exp.date.split('T')[0];
+        const dayObj = last7Days.find((day) => day.dateStr === expDateStr);
+        if (dayObj) {
+          dayObj.profit -= exp.amount;
+        }
+      });
+    }
+
     return last7Days;
-  }, [transactions, lang]);
+  }, [transactions, expenses, lang]);
 
   // Max value for scaling SVG chart
   const maxChartValue = useMemo(() => {
@@ -166,7 +181,7 @@ export default function Dashboard({ transactions, products, lang, theme }: Dashb
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Upper Cards section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         
         {/* Card 1: Total Sales */}
         <div className={`rounded-2xl p-6 border shadow-sm transition hover:shadow-md relative overflow-hidden group ${cardBgClass}`}>
@@ -210,6 +225,30 @@ export default function Dashboard({ transactions, products, lang, theme }: Dashb
               {t.posCostShort}
             </span>
             {t.dashCostDesc}
+          </div>
+        </div>
+
+        {/* Card 2.5: Operational Expenses */}
+        <div className={`rounded-2xl p-6 border shadow-sm transition hover:shadow-md relative overflow-hidden group ${cardBgClass}`}>
+          <div className="absolute top-0 right-0 left-0 h-1.5 w-full bg-rose-500"></div>
+          <div className="flex justify-between items-center">
+            <div>
+              <p className={`text-sm font-medium mb-1 ${textSecondaryClass}`}>
+                {lang === 'ar' ? 'نفقات المواد والمصاريف' : 'Expenses & Material Costs'}
+              </p>
+              <h3 className={`text-3xl font-bold tracking-tight ${textPrimaryClass}`}>
+                {stats.totalExpenses.toLocaleString(lang === 'ar' ? 'ar-EG-u-nu-latn' : 'en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} <span className="text-sm font-semibold text-rose-500">{t.currency}</span>
+              </h3>
+            </div>
+            <div className="bg-rose-50 dark:bg-zinc-800 text-rose-600 dark:text-rose-400 p-3.5 rounded-xl group-hover:scale-110 transition-transform">
+              <TrendingDown className="w-6 h-6" />
+            </div>
+          </div>
+          <div className={`mt-4 flex items-center text-xs ${textTertiaryClass}`}>
+            <span className="text-rose-500 font-medium mx-1">
+              {lang === 'ar' ? 'سحوبات الصندوق' : 'Drawer Withdrawals'}
+            </span>
+            {lang === 'ar' ? 'إجمالي المبالغ المسحوبة لشراء المواد' : 'Total cash drawn for materials'}
           </div>
         </div>
 

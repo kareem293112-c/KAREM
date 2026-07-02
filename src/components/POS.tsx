@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Product, CartItem, Transaction } from '../types';
-import { Search, ShoppingCart, User, Plus, Minus, Trash2, AlertCircle, TrendingUp, CheckCircle, Percent, Printer, FileText, X } from 'lucide-react';
+import { Search, ShoppingCart, User, Plus, Minus, Trash2, AlertCircle, TrendingUp, CheckCircle, Percent, Printer, FileText, X, Clock, History, Calendar } from 'lucide-react';
 import { translations } from '../translations';
 
 interface POSProps {
@@ -9,6 +9,14 @@ interface POSProps {
   onPrintTransaction: (tx: Transaction, received: number) => void;
   lang: 'ar' | 'en';
   theme: 'light' | 'dark' | 'eye-care';
+}
+
+interface HeldOrder {
+  id: string;
+  customerName: string;
+  cart: CartItem[];
+  notes: string;
+  heldAt: string;
 }
 
 export default function POS({ products, onAddTransaction, onPrintTransaction, lang, theme }: POSProps) {
@@ -26,6 +34,23 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [lastCompletedTx, setLastCompletedTx] = useState<Transaction | null>(null);
   const [lastReceivedAmount, setLastReceivedAmount] = useState<number>(0);
+
+  // Suspended/Held Orders state
+  const [heldOrders, setHeldOrders] = useState<HeldOrder[]>(() => {
+    const saved = localStorage.getItem('accounting_held_orders');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [showHeldOrdersModal, setShowHeldOrdersModal] = useState(false);
+  const [showHoldSuccessToast, setShowHoldSuccessToast] = useState(false);
+
+  // Check if inside an iframe to show print environment recommendations
+  const isInIframe = useMemo(() => {
+    try {
+      return window.self !== window.top;
+    } catch (e) {
+      return true;
+    }
+  }, []);
 
   // Filter products by search query
   const filteredProducts = useMemo(() => {
@@ -159,6 +184,72 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
     setTimeout(() => setShowSuccessToast(false), 3500);
   };
 
+  // Suspend (Hold) the current cart
+  const handleHoldOrder = () => {
+    if (cart.length === 0) return;
+    
+    const clientName = customerName.trim() || (lang === 'ar' ? `طلب معلّق` : `Suspended Order`);
+    const newHeld: HeldOrder = {
+      id: `held-${Date.now()}`,
+      customerName: clientName,
+      cart: [...cart],
+      notes: notes,
+      heldAt: new Date().toISOString(),
+    };
+    
+    const updated = [newHeld, ...heldOrders];
+    setHeldOrders(updated);
+    localStorage.setItem('accounting_held_orders', JSON.stringify(updated));
+    
+    // Reset state
+    setCart([]);
+    setCustomerName('');
+    setNotes('');
+    setReceivedAmount('');
+    setErrorMessage('');
+    
+    // Show success toast
+    setShowHoldSuccessToast(true);
+    setTimeout(() => setShowHoldSuccessToast(false), 3500);
+  };
+
+  // Restore a held order back into the active cart
+  const handleRetrieveOrder = (held: HeldOrder) => {
+    // Merge or append products to existing cart items
+    const newCart = [...cart];
+    held.cart.forEach((heldItem) => {
+      const matchIdx = newCart.findIndex((item) => item.product.id === heldItem.product.id);
+      if (matchIdx > -1) {
+        newCart[matchIdx].quantity += heldItem.quantity;
+      } else {
+        newCart.push(heldItem);
+      }
+    });
+    setCart(newCart);
+    
+    // Restore customer metadata if not generic placeholder
+    if (held.customerName !== (lang === 'ar' ? 'طلب معلّق' : 'Suspended Order')) {
+      setCustomerName(held.customerName);
+    }
+    if (held.notes) {
+      setNotes(held.notes);
+    }
+
+    // Remove from held list
+    const updated = heldOrders.filter((o) => o.id !== held.id);
+    setHeldOrders(updated);
+    localStorage.setItem('accounting_held_orders', JSON.stringify(updated));
+    
+    setShowHeldOrdersModal(false);
+  };
+
+  // Cancel / Delete a held order from the suspended list
+  const handleDeleteHeldOrder = (id: string) => {
+    const updated = heldOrders.filter((o) => o.id !== id);
+    setHeldOrders(updated);
+    localStorage.setItem('accounting_held_orders', JSON.stringify(updated));
+  };
+
   // Theme styling configurations
   const cardBgClass = 
     theme === 'dark' 
@@ -226,6 +317,19 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
           <div>
             <h4 className="font-bold">{lang === 'ar' ? 'تم تسجيل البيع بنجاح!' : 'Sale Completed!'}</h4>
             <p className="text-xs text-emerald-100 mt-0.5">{t.posToastSuccess}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Hold Order Success Banner notification */}
+      {showHoldSuccessToast && (
+        <div className="fixed top-6 left-6 z-50 bg-amber-600 text-white rounded-2xl p-4 shadow-xl flex items-center gap-3 border border-amber-500 animate-bounce animate-duration-150">
+          <Clock className="w-6 h-6 text-amber-100 animate-pulse" />
+          <div>
+            <h4 className="font-bold">{lang === 'ar' ? 'تم تعليق الطلب الحالي!' : 'Order Suspended!'}</h4>
+            <p className="text-xs text-amber-100 mt-0.5">
+              {lang === 'ar' ? 'تم حفظ محتويات السلة وتفريغها للزبون التالي.' : 'Cart contents saved and cleared for the next customer.'}
+            </p>
           </div>
         </div>
       )}
@@ -364,9 +468,21 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
               <ShoppingCart className="w-5 h-5 text-indigo-400" />
               <h3 className="font-bold text-md">{t.posActiveCart}</h3>
             </div>
-            <span className="bg-slate-700 dark:bg-zinc-800 text-slate-200 text-xs font-bold px-3 py-1 rounded-full">
-              {cart.reduce((acc, c) => acc + c.quantity, 0)} {lang === 'ar' ? 'قطع' : 'pcs'}
-            </span>
+            <div className="flex items-center gap-2">
+              {heldOrders.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowHeldOrdersModal(true)}
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold px-2.5 py-1.5 rounded-xl transition hover:scale-105 active:scale-95 flex items-center gap-1 cursor-pointer"
+                >
+                  <History className="w-3.5 h-3.5" />
+                  <span>{lang === 'ar' ? `المعلّقة (${heldOrders.length})` : `Held (${heldOrders.length})`}</span>
+                </button>
+              )}
+              <span className="bg-slate-700 dark:bg-zinc-800 text-slate-200 text-xs font-bold px-3 py-1 rounded-full">
+                {cart.reduce((acc, c) => acc + c.quantity, 0)} {lang === 'ar' ? 'قطع' : 'pcs'}
+              </span>
+            </div>
           </div>
 
           {/* Cart Contents */}
@@ -570,9 +686,20 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
           </div>
 
           {/* Submit Checkout button */}
-          <div className={`p-5 border-t ${
+          <div className={`p-5 border-t flex flex-col gap-2.5 ${
             theme === 'dark' ? 'bg-zinc-900 border-zinc-800' : theme === 'eye-care' ? 'bg-[#f7eedc] border-[#dfca9e]' : 'bg-white border-slate-100'
           }`}>
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={handleHoldOrder}
+                className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-amber-500 hover:bg-amber-600 text-white shadow-sm flex items-center justify-center gap-1.5 transition hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+              >
+                <Clock className="w-4 h-4" />
+                {lang === 'ar' ? 'تعليق وتأجيل الطلب الحالي' : 'Hold / Suspend Current Order'}
+              </button>
+            )}
+
             <button
               type="submit"
               disabled={cart.length === 0}
@@ -637,6 +764,16 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
                   <p className="text-[9px] text-zinc-500">
                     {lang === 'ar' ? 'سند مبيعات مبسط' : 'Simplified Sales Receipt'}
                   </p>
+                  
+                  <div className="bg-zinc-100 p-2 rounded-lg text-center my-2 border border-zinc-200">
+                    <span className="text-[10px] font-bold block text-zinc-600">
+                      {lang === 'ar' ? 'رقم الطلب اليومي' : 'Daily Order Number'}
+                    </span>
+                    <span className="text-xl font-black text-black">
+                      #{lastCompletedTx.orderNumber}
+                    </span>
+                  </div>
+
                   <div className="border-b border-dashed border-zinc-400 my-1"></div>
                 </div>
 
@@ -721,21 +858,22 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
             <div className={`p-5 border-t flex flex-col gap-3 ${
               theme === 'dark' ? 'border-zinc-800 bg-zinc-900/40' : theme === 'eye-care' ? 'border-[#dfca9e] bg-[#f5ebd6]/40' : 'border-slate-100 bg-slate-50/40'
             }`}>
-              <button
-                onClick={() => onPrintTransaction(lastCompletedTx, lastReceivedAmount)}
-                type="button"
-                className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white shadow-md flex items-center justify-center gap-2 hover:scale-[1.01] transition duration-150 cursor-pointer"
-              >
-                <Printer className="w-5 h-5" />
-                {lang === 'ar' ? 'طباعة الفاتورة الحرارية' : 'Print Thermal Invoice'}
-              </button>
-              
+
+
               <button
                 onClick={() => {
                   setShowReceiptModal(false);
                   setLastCompletedTx(null);
                   setLastReceivedAmount(0);
                 }}
+                type="button"
+                className="w-full py-3 px-4 rounded-xl font-bold text-sm bg-indigo-600 hover:bg-indigo-700 text-white shadow-md flex items-center justify-center gap-2 hover:scale-[1.01] transition duration-150 cursor-pointer"
+              >
+                <span>{lang === 'ar' ? 'بدء عملية بيع جديدة' : 'Start New Sale'}</span>
+              </button>
+
+              <button
+                onClick={() => onPrintTransaction(lastCompletedTx, lastReceivedAmount)}
                 type="button"
                 className={`w-full py-3 px-4 rounded-xl font-bold text-sm border transition flex items-center justify-center gap-2 cursor-pointer ${
                   theme === 'dark'
@@ -745,9 +883,133 @@ export default function POS({ products, onAddTransaction, onPrintTransaction, la
                     : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
                 }`}
               >
-                <X className="w-4 h-4" />
-                {lang === 'ar' ? 'بدء عملية بيع جديدة' : 'Start New Sale'}
+                <Printer className="w-5 h-5" />
+                {lang === 'ar' ? 'طباعة الفاتورة الحرارية' : 'Print Thermal Invoice'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. Suspended/Held Orders Modal list */}
+      {showHeldOrdersModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div 
+            className={`w-full max-w-lg overflow-hidden rounded-2xl shadow-2xl flex flex-col max-h-[85vh] border transition-all duration-300 ${
+              theme === 'dark' 
+                ? 'bg-zinc-900 border-zinc-800 text-zinc-100' 
+                : theme === 'eye-care' 
+                ? 'bg-[#fcf8f2] border-[#e6d0a7] text-[#433422]' 
+                : 'bg-white border-slate-100 text-slate-800'
+            }`}
+          >
+            {/* Modal Header */}
+            <div className={`p-5 border-b flex justify-between items-center ${
+              theme === 'dark' ? 'border-zinc-800 bg-zinc-950/25' : theme === 'eye-care' ? 'border-[#dfca9e] bg-[#f5ebd6]' : 'border-slate-100 bg-slate-50'
+            }`} dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+              <div className="flex items-center gap-2">
+                <History className="w-5 h-5 text-amber-500" />
+                <h3 className="text-base font-extrabold">
+                  {lang === 'ar' ? 'قائمة الطلبات المعلّقة (المؤجلة)' : 'Suspended / Held Orders'}
+                </h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowHeldOrdersModal(false)}
+                className="text-slate-400 hover:text-rose-500 p-1.5 rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* List of Held Orders */}
+            <div className="p-6 flex-1 overflow-y-auto space-y-4" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+              {heldOrders.length === 0 ? (
+                <div className={`text-center py-12 flex flex-col items-center justify-center ${textSecondaryClass}`}>
+                  <History className="w-12 h-12 text-slate-200 dark:text-zinc-800 mb-3" />
+                  <p className="text-sm font-semibold">{lang === 'ar' ? 'لا توجد طلبات معلّقة حالياً' : 'No suspended orders'}</p>
+                </div>
+              ) : (
+                heldOrders.map((held) => {
+                  const itemsCount = held.cart.reduce((sum, item) => sum + item.quantity, 0);
+                  const totalSum = held.cart.reduce((sum, item) => sum + (item.customSellingPrice * item.quantity), 0);
+                  const formattedTime = new Date(held.heldAt).toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                  });
+                  const formattedDate = new Date(held.heldAt).toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US', {
+                    month: 'short',
+                    day: 'numeric'
+                  });
+
+                  return (
+                    <div 
+                      key={held.id}
+                      className={`p-4 rounded-xl border flex flex-col gap-3 transition hover:scale-[1.01] ${
+                        theme === 'dark' 
+                          ? 'bg-zinc-850/60 border-zinc-800 hover:bg-zinc-800' 
+                          : theme === 'eye-care' 
+                          ? 'bg-[#faf2e4] border-[#dfca9e] hover:bg-[#ebdcc3]/50' 
+                          : 'bg-slate-50 border-slate-200/60 hover:bg-slate-100/50'
+                      }`}
+                    >
+                      <div className="flex justify-between items-start flex-wrap gap-2">
+                        <div>
+                          <h4 className={`font-bold text-sm ${textPrimaryClass}`}>{held.customerName}</h4>
+                          <span className={`text-[10px] mt-1 block ${textSecondaryClass}`}>
+                            <Clock className="w-3 h-3 inline-block mx-0.5" />
+                            {formattedDate} - {formattedTime}
+                          </span>
+                        </div>
+                        <div className={lang === 'ar' ? 'text-left' : 'text-right'}>
+                          <span className="font-extrabold text-sm text-indigo-600 dark:text-indigo-400 block">
+                            {totalSum.toLocaleString()} {t.currency}
+                          </span>
+                          <span className={`text-[10px] block mt-0.5 ${textSecondaryClass}`}>
+                            {itemsCount} {lang === 'ar' ? 'قطع' : 'pcs'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Display items list inside */}
+                      <div className={`p-2.5 rounded-lg text-xs space-y-1 ${
+                        theme === 'dark' ? 'bg-zinc-900/60' : theme === 'eye-care' ? 'bg-[#faf5ea]/50' : 'bg-white'
+                      }`}>
+                        {held.cart.map((c, index) => (
+                          <div key={index} className="flex justify-between items-center text-[11px]">
+                            <span className={textPrimaryClass}>{c.product.name}</span>
+                            <span className="font-mono text-slate-400">×{c.quantity}</span>
+                          </div>
+                        ))}
+                        {held.notes && (
+                          <div className="pt-1.5 border-t border-dashed border-slate-200 dark:border-zinc-800 text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                            {lang === 'ar' ? 'ملاحظة: ' : 'Note: '}{held.notes}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteHeldOrder(held.id)}
+                          className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition cursor-pointer"
+                        >
+                          {lang === 'ar' ? 'إلغاء وحذف' : 'Delete'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRetrieveOrder(held)}
+                          className="px-4 py-1.5 rounded-lg text-[11px] font-extrabold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition hover:scale-[1.02] cursor-pointer"
+                        >
+                          {lang === 'ar' ? 'استعادة الطلب' : 'Retrieve Order'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
